@@ -9,6 +9,7 @@ export interface PlayerSlot {
   leaderUid: string;
   members?: string[];
   registeredAt: string;
+  userId?: string;
 }
 
 export interface PrizeBreakdown {
@@ -31,6 +32,7 @@ export interface Tournament {
   maxSlots: number;
   registeredCount: number;
   slots: PlayerSlot[];
+  players?: string[]; // Array of registered player Auth UIDs to prevent double registration
   startTime: string; // ISO string
   status: MatchStatus;
   roomId?: string;
@@ -52,6 +54,7 @@ export interface MatchProofSubmission {
   id: string;
   tournamentId: string;
   tournamentTitle: string;
+  userId?: string;
   playerIgn: string;
   playerUid: string;
   claimedRank: number;
@@ -64,6 +67,7 @@ export interface MatchProofSubmission {
 
 export interface DepositRequest {
   id: string;
+  userId?: string; // Auth UID of player
   playerIgn: string;
   playerUid: string;
   amountPkr: number;
@@ -78,6 +82,7 @@ export interface DepositRequest {
 
 export interface WithdrawalRequest {
   id: string;
+  userId?: string; // Auth UID of player
   playerIgn: string;
   playerUid: string;
   amountPkr: number;
@@ -96,10 +101,14 @@ export interface AdminPaymentSettings {
   jazzcashTitle: string;
   adminPin: string;
   supportWhatsapp: string;
+  merchantApiEnabled?: boolean;
+  merchantApiKey?: string;
+  merchantStoreId?: string;
 }
 
 export interface WalletTransaction {
   id: string;
+  userId?: string;
   type: 'deposit' | 'entry_fee' | 'prize_won' | 'withdrawal';
   amount: number;
   description: string;
@@ -120,4 +129,17 @@ export interface GuideStep {
   proTipUrdu: string;
   proTipEn: string;
   iconName: string;
+}
+
+export interface UserProfile {
+  id: string; // Auth UID
+  email: string;
+  displayName: string; // Free Fire IGN
+  ffUid: string; // Free Fire numeric Game UID
+  phone?: string;
+  walletBalance: number;
+  role: 'player' | 'admin';
+  registeredTournaments?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }

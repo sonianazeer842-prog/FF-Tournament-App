@@ -171,7 +171,7 @@ export const TournamentCard: React.FC<TournamentCardProps> = ({
                 sounds.playClick();
                 onSelect(tournament);
               }}
-              className="py-2 px-3 text-xs font-semibold rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-colors flex items-center gap-1"
+              className="py-2 px-3 text-xs font-semibold rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-colors flex items-center gap-1 cursor-pointer"
             >
               <CheckCircle className="w-3.5 h-3.5" />
               <span>{language === 'ur' ? 'Registered' : 'Registered'}</span>
@@ -204,9 +204,9 @@ export const TournamentCard: React.FC<TournamentCardProps> = ({
                 sounds.playClick();
                 onJoin(tournament);
               }}
-              className="py-2 px-4 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-sm transition-all flex items-center gap-1.5 whitespace-nowrap"
+              className="py-2 px-3.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-sm transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer active:scale-95"
             >
-              <span>{tournament.entryFee === 0 ? 'Free Entry' : `${tournament.entryFee} Coins`}</span>
+              <span>{tournament.entryFee === 0 ? 'Register (Free)' : `Register (Rs. ${tournament.entryFee})`}</span>
               <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
             </button>
           )}

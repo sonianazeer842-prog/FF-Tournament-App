@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // User Profile: each player has their own document and wallet balance
+    // Allows admin approval and player self-updates
+    match /users/{userId} {
+      allow read, write: if true;
+
+      match /transactions/{txId} {
+        allow read, write: if true;
+      }
+    }
+
+    // EasyPaisa & JazzCash Deposit Requests
+    match /deposit_requests/{depId} {
+      allow read, write: if true;
+    }
+
+    // Cashout Requests
+    match /withdrawal_requests/{wdrId} {
+      allow read, write: if true;
+    }
+
+    // Tournaments & Slot Registrations
+    match /tournaments/{tournId} {
+      allow read, write: if true;
+    }
+
+    // Saad Kazi Payment Receiving Settings (EasyPaisa & JazzCash)
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    // Match proofs
+    match /match_proofs/{proofId} {
+      allow read, write: if true;
+    }
+
+    // Connection testing
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

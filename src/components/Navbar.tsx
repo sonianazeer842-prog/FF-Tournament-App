@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Wallet, Smartphone, User } from 'lucide-react';
+import { Trophy, Wallet, Smartphone, User, LogIn, LogOut, Crosshair } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 import { sounds } from '../utils/audio';
 
@@ -10,6 +10,11 @@ interface NavbarProps {
   walletBalance: number;
   language: 'ur' | 'en';
   setLanguage: (lang: 'ur' | 'en') => void;
+  openAuthModal: () => void;
+  isLoggedIn: boolean;
+  playerIgn: string;
+  playerUid: string;
+  onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -19,10 +24,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   walletBalance,
   language,
   setLanguage,
+  openAuthModal,
+  isLoggedIn,
+  playerIgn,
+  playerUid,
+  onLogout,
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 sm:gap-8">
+      <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-6">
         {/* Zone 1: Brand Wordmark */}
         <div
           onClick={() => {
@@ -39,20 +49,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </div>
 
-        {/* Zone 2: Clean single-line text navigation links */}
+        {/* Zone 2: Navigation Links */}
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-neutral-300">
           <button
             onClick={() => {
               sounds.playClick();
               setActiveTab('tournaments');
             }}
-            className={`whitespace-nowrap transition-colors hover:text-white ${
+            className={`whitespace-nowrap transition-colors hover:text-white cursor-pointer ${
               activeTab === 'tournaments'
                 ? 'text-amber-400 font-semibold underline underline-offset-8 decoration-2 decoration-amber-500'
                 : 'text-neutral-400'
             }`}
           >
-            {language === 'ur' ? 'Tournaments' : 'Tournaments'}
+            Tournaments
           </button>
 
           <button
@@ -60,13 +70,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               sounds.playClick();
               setActiveTab('guide');
             }}
-            className={`whitespace-nowrap transition-colors hover:text-white ${
+            className={`whitespace-nowrap transition-colors hover:text-white cursor-pointer ${
               activeTab === 'guide'
                 ? 'text-amber-400 font-semibold underline underline-offset-8 decoration-2 decoration-amber-500'
                 : 'text-neutral-400'
             }`}
           >
-            {language === 'ur' ? 'Step-by-Step Rahnumai' : 'Esports Guide'}
+            Esports Guide
           </button>
 
           <button
@@ -74,13 +84,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               sounds.playClick();
               setActiveTab('points');
             }}
-            className={`whitespace-nowrap transition-colors hover:text-white ${
+            className={`whitespace-nowrap transition-colors hover:text-white cursor-pointer ${
               activeTab === 'points'
                 ? 'text-amber-400 font-semibold underline underline-offset-8 decoration-2 decoration-amber-500'
                 : 'text-neutral-400'
             }`}
           >
-            {language === 'ur' ? 'FFWS Points Table' : 'FFWS Points Table'}
+            FFWS Points Table
           </button>
 
           <button
@@ -88,32 +98,55 @@ export const Navbar: React.FC<NavbarProps> = ({
               sounds.playClick();
               setActiveTab('profile');
             }}
-            className={`whitespace-nowrap transition-colors hover:text-white ${
+            className={`whitespace-nowrap transition-colors hover:text-white cursor-pointer ${
               activeTab === 'profile'
                 ? 'text-amber-400 font-semibold underline underline-offset-8 decoration-2 decoration-amber-500'
                 : 'text-neutral-400'
             }`}
           >
-            {language === 'ur' ? 'Player Profile' : 'Player Profile'}
+            Player Profile
           </button>
         </nav>
 
-        {/* Zone 3: Primary Action, PWA Install & Wallet */}
+        {/* Zone 3: Primary Action, Auth & Wallet */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           {/* PWA Install Button in Header */}
           <PWAInstallButton variant="button" language={language} />
 
-          {/* Language Toggle */}
-          <button
-            onClick={() => {
-              sounds.playClick();
-              setLanguage(language === 'ur' ? 'en' : 'ur');
-            }}
-            title="Switch Language / Zuban Badlein"
-            className="px-2 py-1 text-xs font-semibold text-neutral-300 hover:text-white bg-neutral-900 border border-neutral-800 rounded-md transition-colors"
-          >
-            {language === 'ur' ? 'English' : 'اردو'}
-          </button>
+          {/* User Auth Button */}
+          {isLoggedIn ? (
+            <button
+              onClick={() => {
+                sounds.playClick();
+                setActiveTab('profile');
+              }}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs text-neutral-200 transition-colors cursor-pointer group"
+              title={`Logged in as ${playerIgn} (UID: ${playerUid})`}
+            >
+              <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs font-mono">
+                {playerIgn ? playerIgn.charAt(0).toUpperCase() : 'P'}
+              </div>
+              <div className="hidden sm:flex flex-col text-left">
+                <span className="font-bold text-white text-xs truncate max-w-[100px] leading-tight">
+                  {playerIgn}
+                </span>
+                <span className="text-[10px] text-amber-400/90 font-mono leading-tight">
+                  UID:{playerUid.slice(-4)}
+                </span>
+              </div>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                sounds.playClick();
+                openAuthModal();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-95 text-neutral-950 font-bold text-xs transition-all shadow-md cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Sign In</span>
+            </button>
+          )}
 
           {/* Wallet Balance with EasyPaisa / JazzCash badge */}
           <button
@@ -121,7 +154,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               sounds.playClick();
               openWallet();
             }}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-200 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-200 transition-colors cursor-pointer"
           >
             <Wallet className="w-3.5 h-3.5 text-amber-400" />
             <span className="tabular-nums font-mono font-bold text-amber-400">Rs.{walletBalance}</span>

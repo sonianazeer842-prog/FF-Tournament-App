@@ -13,6 +13,10 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { PlayerProfileView } from './components/PlayerProfileView';
 import { AdminLoginModal } from './components/AdminLoginModal';
+import { AuthModal } from './components/AuthModal';
+import { RegistrationFeedbackModal, RegistrationModalType } from './components/RegistrationFeedbackModal';
+import { useAuth } from './context/AuthContext';
+import confetti from 'canvas-confetti';
 
 import {
   Tournament,
@@ -25,39 +29,111 @@ import {
 } from './types/tournament';
 import {
   INITIAL_TOURNAMENTS,
-  INITIAL_TRANSACTIONS,
   INITIAL_PENDING_PROOFS,
   INITIAL_DEPOSIT_REQUESTS,
   INITIAL_WITHDRAWAL_REQUESTS,
   INITIAL_ADMIN_SETTINGS,
 } from './data/mockTournaments';
+import {
+  subscribeTournaments,
+  subscribeDepositRequests,
+  subscribeWithdrawalRequests,
+  subscribeAdminSettings,
+  registerPlayerForTournament,
+  submitDepositRequest,
+  approveDepositInDb,
+  rejectDepositInDb,
+  submitWithdrawalInDb,
+  completeWithdrawalInDb,
+  rejectWithdrawalInDb,
+  updateRoomCredentialsInDb,
+  createTournamentInDb,
+  declareWinnerInDb,
+  saveAdminSettingsInDb,
+} from './lib/tournamentService';
 import { sounds } from './utils/audio';
-import { Trophy, Flame, Plus, ArrowRight, Lock, ShieldCheck } from 'lucide-react';
+import { Trophy, Flame, Plus, ArrowRight, Lock, ShieldCheck, UserCheck } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'tournaments' | 'guide' | 'points' | 'wallet' | 'profile'>('tournaments');
   const [language, setLanguage] = useState<'ur' | 'en'>('ur');
 
-  // Secret Admin Portal state (accessible via secret URL or via Footer with password 7860)
+  // Firebase Authentication Context (Individual player account system)
+  const { user, userProfile, userTransactions, logout, updateProfileData } = useAuth();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
+  // Secret Admin Portal state (accessible via secret URL /qazi-admin-786 or via Footer with password 7860)
   const [isSecretAdminRoute, setIsSecretAdminRoute] = useState(false);
   const [isAdminAuthorized, setIsAdminAuthorized] = useState(false);
   const [adminLoginOpen, setAdminLoginOpen] = useState(false);
 
-  // Player identity for simulation
-  const playerIgn = 'SOUL・Predator';
-  const playerUid = '284918294';
+  // Active Player identity (Strictly unique per authenticated player)
+  const playerIgn = userProfile?.displayName || (user?.email ? user.email.split('@')[0] : 'Guest Contender');
+  const playerUid = userProfile?.ffUid || (user ? 'UID-' + user.uid.slice(0, 8) : 'Not Logged In');
+  const playerEmail = user?.email || userProfile?.email;
+  const isLoggedIn = !!user;
 
-  // Core App States (Shared between Player App and Admin Panel)
+  // Real-time Firestore synchronized states
   const [tournaments, setTournaments] = useState<Tournament[]>(INITIAL_TOURNAMENTS);
-  const [userRegisteredIds, setUserRegisteredIds] = useState<string[]>(['ff-tourn-01']);
-  const [walletBalance, setWalletBalance] = useState<number>(850);
-  const [transactions, setTransactions] = useState<WalletTransaction[]>(INITIAL_TRANSACTIONS);
-  const [pendingProofs, setPendingProofs] = useState<MatchProofSubmission[]>(INITIAL_PENDING_PROOFS);
-
-  // Pakistan Payment States
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>(INITIAL_DEPOSIT_REQUESTS);
   const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalRequest[]>(INITIAL_WITHDRAWAL_REQUESTS);
   const [adminSettings, setAdminSettings] = useState<AdminPaymentSettings>(INITIAL_ADMIN_SETTINGS);
+  const [pendingProofs, setPendingProofs] = useState<MatchProofSubmission[]>(INITIAL_PENDING_PROOFS);
+
+  // Individual player's wallet balance (0 by default, updated in real-time when Admin approves deposit)
+  const walletBalance: number = userProfile?.walletBalance ?? 0;
+
+  // Real-time Firestore subscriptions for tournaments, deposits, cashouts, and Saad Kazi's settings
+  useEffect(() => {
+    const unsubTourn = subscribeTournaments((ts) => {
+      setTournaments(ts);
+    });
+    const unsubDep = subscribeDepositRequests((deps) => {
+      setDepositRequests(deps);
+    });
+    const unsubWdr = subscribeWithdrawalRequests((wdrs) => {
+      setWithdrawalRequests(wdrs);
+    });
+    const unsubSettings = subscribeAdminSettings((st) => {
+      setAdminSettings(st);
+    });
+
+    return () => {
+      unsubTourn();
+      unsubDep();
+      unsubWdr();
+      unsubSettings();
+    };
+  }, []);
+
+  // Compute registered tournament IDs specifically for THIS authenticated player
+  const userRegisteredIds: string[] = React.useMemo(() => {
+    if (!user) return [];
+    if (userProfile?.registeredTournaments && userProfile.registeredTournaments.length > 0) {
+      return userProfile.registeredTournaments;
+    }
+    return tournaments
+      .filter((t) => t.players?.includes(user.uid) || t.slots?.some((s) => s.userId === user.uid))
+      .map((t) => t.id);
+  }, [user, userProfile, tournaments]);
+
+  const handleUpdateIgnUid = async (newIgn: string, newUid: string) => {
+    if (user) {
+      await updateProfileData({
+        displayName: newIgn,
+        ffUid: newUid,
+      });
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      sounds.playClick();
+    } catch (e) {
+      console.error('Logout error:', e);
+    }
+  };
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,7 +146,20 @@ export default function App() {
   const [proofTournament, setProofTournament] = useState<Tournament | null>(null);
   const [walletOpen, setWalletOpen] = useState(false);
 
-  // Check for Secret Admin Route on load and route changes
+  // Registration Feedback Modal State (Insufficient Balance / Success / Already Registered)
+  const [feedbackModal, setFeedbackModal] = useState<{
+    isOpen: boolean;
+    type: RegistrationModalType;
+    tournament: Tournament | null;
+    assignedSlot: PlayerSlot | null;
+  }>({
+    isOpen: false,
+    type: 'success',
+    tournament: null,
+    assignedSlot: null,
+  });
+
+  // Check for Secret Admin Route on load and route changes (/qazi-admin-786)
   useEffect(() => {
     const checkSecretRoute = () => {
       if (typeof window === 'undefined') return;
@@ -78,7 +167,6 @@ export default function App() {
       const hash = window.location.hash.toLowerCase();
       const search = window.location.search.toLowerCase();
 
-      // Secret routes: /qazi-admin-786 or #qazi-admin-786 or ?admin=qazi-786
       const isSecret =
         path.includes('qazi-admin-786') ||
         hash.includes('qazi-admin-786') ||
@@ -109,167 +197,222 @@ export default function App() {
     setActiveTab('tournaments');
   };
 
-  // Tournament Joining
-  const handleJoinSuccess = (tournamentId: string, slot: PlayerSlot, fee: number) => {
-    setTournaments((prev) =>
-      prev.map((t) => {
-        if (t.id === tournamentId) {
-          return {
-            ...t,
-            registeredCount: t.registeredCount + 1,
-            slots: [...t.slots, slot],
-          };
-        }
-        return t;
-      })
-    );
-
-    setUserRegisteredIds((prev) => [...prev, tournamentId]);
-
-    if (fee > 0) {
-      setWalletBalance((prev) => prev - fee);
-      const newTx: WalletTransaction = {
-        id: `tx-${Date.now()}`,
-        type: 'entry_fee',
-        amount: -fee,
-        description: `Entry Fee: ${slot.teamName || slot.leaderIgn}`,
-        timestamp: 'Just now',
-        status: 'completed',
-      };
-      setTransactions((prev) => [newTx, ...prev]);
+  // ========================================================
+  // TOURNAMENT REGISTRATION WITH WALLET SYSTEM (Critical Flow)
+  // ========================================================
+  const handleRegisterTournament = async (tournament: Tournament) => {
+    // Step 1: Ensure individual login
+    if (!user) {
+      sounds.playClick();
+      setAuthModalOpen(true);
+      return;
     }
 
-    setJoiningTournament(null);
+    // Step 2: Prevent double registration
+    const isAlreadyRegistered =
+      userRegisteredIds.includes(tournament.id) ||
+      tournament.players?.includes(user.uid) ||
+      tournament.slots?.some((s) => s.userId === user.uid || s.leaderUid === playerUid);
 
-    const updated = tournaments.find((t) => t.id === tournamentId);
-    if (updated) {
-      setSelectedTournament({
-        ...updated,
-        registeredCount: updated.registeredCount + 1,
-        slots: [...updated.slots, slot],
+    if (isAlreadyRegistered) {
+      sounds.playClick();
+      const assignedSlot =
+        tournament.slots?.find((s) => s.userId === user.uid || s.leaderUid === playerUid) || null;
+      setFeedbackModal({
+        isOpen: true,
+        type: 'already_registered',
+        tournament,
+        assignedSlot,
       });
+      return;
+    }
+
+    // Step 3: Check wallet balance >= entry fee
+    if (walletBalance < tournament.entryFee) {
+      sounds.playClick();
+      setFeedbackModal({
+        isOpen: true,
+        type: 'insufficient_balance',
+        tournament,
+        assignedSlot: null,
+      });
+      return;
+    }
+
+    // Step 4: Balance is enough -> Deduct fee in Firestore, add player UID to tournament, show success
+    try {
+      const result = await registerPlayerForTournament(
+        tournament,
+        user.uid,
+        playerIgn,
+        playerUid,
+        walletBalance
+      );
+
+      if (result.success) {
+        sounds.playVictory();
+        try {
+          confetti({
+            particleCount: 75,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#F59E0B', '#EF4444', '#10B981'],
+          });
+        } catch {}
+
+        setFeedbackModal({
+          isOpen: true,
+          type: 'success',
+          tournament,
+          assignedSlot: result.assignedSlot || null,
+        });
+      } else if (result.error === 'already_registered') {
+        setFeedbackModal({
+          isOpen: true,
+          type: 'already_registered',
+          tournament,
+          assignedSlot: result.assignedSlot || null,
+        });
+      } else if (result.error === 'insufficient_balance') {
+        setFeedbackModal({
+          isOpen: true,
+          type: 'insufficient_balance',
+          tournament,
+          assignedSlot: null,
+        });
+      }
+    } catch (err) {
+      console.error('Error during tournament registration:', err);
     }
   };
 
-  // Pakistan EasyPaisa / JazzCash Deposit Handler (From Player)
-  const handleSubmitDepositRequest = (req: Omit<DepositRequest, 'id' | 'submittedAt' | 'status'>) => {
-    const newReq: DepositRequest = {
-      ...req,
-      id: `dep-pk-${Date.now()}`,
-      submittedAt: 'Just now',
-      status: 'pending',
-    };
-    setDepositRequests((prev) => [newReq, ...prev]);
+  // Legacy modal joining support
+  const handleJoinSuccess = async (tournamentId: string, slot: PlayerSlot, fee: number) => {
+    const target = tournaments.find((t) => t.id === tournamentId);
+    if (target) {
+      await handleRegisterTournament(target);
+    }
+    setJoiningTournament(null);
   };
 
-  // Admin Approves EasyPaisa / JazzCash Deposit
-  const handleApproveDeposit = (depositId: string) => {
+  // ========================================================
+  // PAKISTAN WALLET DEPOSIT & CASHOUT (EasyPaisa & JazzCash)
+  // ========================================================
+  const handleSubmitDepositRequest = async (
+    req: Omit<DepositRequest, 'id' | 'submittedAt' | 'status'>
+  ) => {
+    try {
+      await submitDepositRequest({
+        ...req,
+        userId: user?.uid,
+        playerIgn,
+        playerUid,
+      });
+      sounds.playVictory();
+    } catch (err) {
+      console.error('Failed to submit deposit request:', err);
+    }
+  };
+
+  // Admin approves EasyPaisa / JazzCash Deposit:
+  // Automatically increments the specific player's wallet balance in Firestore!
+  const handleApproveDeposit = async (depositId: string) => {
     const dep = depositRequests.find((d) => d.id === depositId);
     if (!dep) return;
-
-    setDepositRequests((prev) =>
-      prev.map((d) => (d.id === depositId ? { ...d, status: 'approved' as const } : d))
-    );
-
-    setWalletBalance((prev) => prev + dep.amountPkr);
-    const newTx: WalletTransaction = {
-      id: `tx-${Date.now()}`,
-      type: 'deposit',
-      amount: dep.amountPkr,
-      description: `${dep.method} Deposit Verified (TID: ${dep.trxId})`,
-      timestamp: 'Just now',
-      status: 'completed',
-      paymentMethod: dep.method,
-      trxId: dep.trxId,
-    };
-    setTransactions((prev) => [newTx, ...prev]);
+    try {
+      sounds.playVictory();
+      await approveDepositInDb(dep);
+    } catch (err) {
+      console.error('Error approving deposit in Firestore:', err);
+    }
   };
 
-  // Admin Rejects Deposit
-  const handleRejectDeposit = (depositId: string) => {
-    setDepositRequests((prev) =>
-      prev.map((d) => (d.id === depositId ? { ...d, status: 'rejected' as const } : d))
-    );
+  const handleRejectDeposit = async (depositId: string) => {
+    try {
+      sounds.playClick();
+      await rejectDepositInDb(depositId);
+    } catch (err) {
+      console.error('Error rejecting deposit:', err);
+    }
   };
 
-  // Player Submits Cashout / Withdrawal
-  const handleSubmitWithdrawalRequest = (req: Omit<WithdrawalRequest, 'id' | 'submittedAt' | 'status'>) => {
-    const newWdr: WithdrawalRequest = {
-      ...req,
-      id: `wdr-pk-${Date.now()}`,
-      submittedAt: 'Just now',
-      status: 'pending',
-    };
-    setWithdrawalRequests((prev) => [newWdr, ...prev]);
-
-    setWalletBalance((prev) => prev - req.amountPkr);
-    const newTx: WalletTransaction = {
-      id: `tx-${Date.now()}`,
-      type: 'withdrawal',
-      amount: -req.amountPkr,
-      description: `Withdrawal to ${req.method} (${req.accountNumber})`,
-      timestamp: 'Just now',
-      status: 'processing',
-      paymentMethod: req.method,
-    };
-    setTransactions((prev) => [newTx, ...prev]);
+  const handleSubmitWithdrawalRequest = async (
+    req: Omit<WithdrawalRequest, 'id' | 'submittedAt' | 'status'>
+  ) => {
+    try {
+      sounds.playCopy();
+      await submitWithdrawalInDb(req, user?.uid);
+    } catch (err) {
+      console.error('Error submitting withdrawal:', err);
+    }
   };
 
-  // Admin Completes Withdrawal
-  const handleCompleteWithdrawal = (withdrawalId: string, refId: string) => {
-    setWithdrawalRequests((prev) =>
-      prev.map((w) => (w.id === withdrawalId ? { ...w, status: 'completed' as const, referenceId: refId } : w))
-    );
+  const handleCompleteWithdrawal = async (withdrawalId: string, refId: string) => {
+    try {
+      sounds.playVictory();
+      await completeWithdrawalInDb(withdrawalId, refId);
+    } catch (err) {
+      console.error('Error completing withdrawal:', err);
+    }
   };
 
-  // Admin Rejects Withdrawal
-  const handleRejectWithdrawal = (withdrawalId: string) => {
+  const handleRejectWithdrawal = async (withdrawalId: string) => {
     const wdr = withdrawalRequests.find((w) => w.id === withdrawalId);
     if (!wdr) return;
-
-    setWithdrawalRequests((prev) =>
-      prev.map((w) => (w.id === withdrawalId ? { ...w, status: 'rejected' as const } : w))
-    );
-
-    setWalletBalance((prev) => prev + wdr.amountPkr);
+    try {
+      sounds.playClick();
+      await rejectWithdrawalInDb(wdr);
+    } catch (err) {
+      console.error('Error rejecting withdrawal:', err);
+    }
   };
 
-  // Tournament Management Handlers (Admin)
-  const handleCreateTournament = (newT: Tournament) => {
-    setTournaments((prev) => [newT, ...prev]);
+  // ========================================================
+  // ADMIN PORTAL ACTIONS (Saad Kazi Tournament & Settings)
+  // ========================================================
+  const handleCreateTournament = async (newT: Tournament) => {
+    try {
+      sounds.playVictory();
+      await createTournamentInDb(newT);
+    } catch (err) {
+      console.error('Error creating tournament in DB:', err);
+    }
   };
 
-  const handleUpdateRoomCredentials = (tournamentId: string, roomId: string, pass: string, revealNow: boolean) => {
-    setTournaments((prev) =>
-      prev.map((t) => {
-        if (t.id === tournamentId) {
-          return {
-            ...t,
-            roomId,
-            roomPassword: pass,
-            roomRevealed: revealNow,
-            status: revealNow ? 'room_open' : t.status,
-          };
-        }
-        return t;
-      })
-    );
+  const handleUpdateRoomCredentials = async (
+    tournamentId: string,
+    roomId: string,
+    pass: string,
+    revealNow: boolean
+  ) => {
+    try {
+      sounds.playJoin();
+      await updateRoomCredentialsInDb(tournamentId, roomId, pass, revealNow);
+    } catch (err) {
+      console.error('Error updating room credentials in DB:', err);
+    }
   };
 
-  const handleDeclareWinner = (tournamentId: string, winnerTeam: string, winnerIgn: string) => {
-    setTournaments((prev) =>
-      prev.map((t) => {
-        if (t.id === tournamentId) {
-          return {
-            ...t,
-            winnerTeam,
-            winnerBooyahIgn: winnerIgn,
-            status: 'completed',
-          };
-        }
-        return t;
-      })
-    );
+  const handleDeclareWinner = async (
+    tournamentId: string,
+    winnerTeam: string,
+    winnerIgn: string
+  ) => {
+    try {
+      sounds.playVictory();
+      await declareWinnerInDb(tournamentId, winnerTeam, winnerIgn);
+    } catch (err) {
+      console.error('Error declaring winner in DB:', err);
+    }
+  };
+
+  const handleUpdateSettings = async (newSettings: AdminPaymentSettings) => {
+    try {
+      sounds.playVictory();
+      await saveAdminSettingsInDb(newSettings);
+    } catch (err) {
+      console.error('Error saving admin payment settings:', err);
+    }
   };
 
   const handleSubmitProof = (proof: MatchProofSubmission) => {
@@ -277,23 +420,7 @@ export default function App() {
   };
 
   const handleApproveProof = (proofId: string) => {
-    const proof = pendingProofs.find((p) => p.id === proofId);
-    if (!proof) return;
-
     setPendingProofs((prev) => prev.filter((p) => p.id !== proofId));
-
-    if (proof.awardedPrize && proof.awardedPrize > 0) {
-      setWalletBalance((prev) => prev + proof.awardedPrize!);
-      const prizeTx: WalletTransaction = {
-        id: `tx-${Date.now()}`,
-        type: 'prize_won',
-        amount: proof.awardedPrize,
-        description: `Prize Claim Approved: ${proof.tournamentTitle}`,
-        timestamp: 'Just now',
-        status: 'completed',
-      };
-      setTransactions((prev) => [prizeTx, ...prev]);
-    }
   };
 
   const handleRejectProof = (proofId: string) => {
@@ -342,7 +469,7 @@ export default function App() {
             onApproveProof={handleApproveProof}
             onRejectProof={handleRejectProof}
             adminSettings={adminSettings}
-            onUpdateSettings={setAdminSettings}
+            onUpdateSettings={handleUpdateSettings}
             onExitAdmin={handleExitAdmin}
             language={language}
             initiallyUnlocked={isAdminAuthorized}
@@ -352,10 +479,10 @@ export default function App() {
     );
   }
 
-  // PUBLIC PLAYER APP: 100% Mobile-First Responsive PWA with NO Admin links whatsoever!
+  // PUBLIC PLAYER APP: Mobile-First Responsive PWA
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans overflow-x-hidden pb-20 md:pb-8">
-      {/* Navigation Bar (Pure Player Experience) */}
+      {/* Navigation Bar (Shows individual user profile, wallet balance, and logout) */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -363,11 +490,16 @@ export default function App() {
         walletBalance={walletBalance}
         language={language}
         setLanguage={setLanguage}
+        openAuthModal={() => setAuthModalOpen(true)}
+        isLoggedIn={isLoggedIn}
+        playerIgn={playerIgn}
+        playerUid={playerUid}
+        onLogout={handleLogout}
       />
 
-      {/* Main Container */}
+      {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-6">
-        {/* PWA In-App Install Prompt Banner (Visible on Home view) */}
+        {/* PWA In-App Install Prompt Banner */}
         {activeTab === 'tournaments' && (
           <PWAInstallButton variant="banner" language={language} />
         )}
@@ -386,7 +518,33 @@ export default function App() {
               language={language}
             />
 
-            {/* EasyPaisa / JazzCash Fast Action Notice for Pakistan */}
+            {/* Individual Account Status Notification */}
+            {!isLoggedIn && (
+              <div className="mb-4 p-3.5 sm:p-4 rounded-xl bg-gradient-to-r from-amber-500/15 via-neutral-900 to-orange-500/15 border border-amber-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                    <UserCheck className="w-4 h-4 stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-white block">Battle with Your Own Free Fire ID</span>
+                    <span className="text-neutral-400">
+                      Create an account with your Email, IGN & numeric UID to enter tournaments and receive room passwords.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    sounds.playClick();
+                    setAuthModalOpen(true);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold whitespace-nowrap transition-all shadow-sm cursor-pointer"
+                >
+                  Create Account / Login
+                </button>
+              </div>
+            )}
+
+            {/* EasyPaisa / JazzCash Fast Deposit Banner (Pakistan) */}
             <div className="mb-5 p-3.5 sm:p-4 rounded-xl bg-gradient-to-r from-emerald-950/40 via-neutral-900 to-red-950/30 border border-neutral-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1 font-bold text-emerald-400 font-mono text-xs sm:text-sm">
@@ -396,8 +554,8 @@ export default function App() {
                 </div>
                 <span className="text-neutral-300">
                   {language === 'ur'
-                    ? 'Direct EasyPaisa aur JazzCash se deposit karein aur winning amount foran cashout karein.'
-                    : 'Instant Pakistan deposits and cashouts via EasyPaisa and JazzCash supported.'}
+                    ? 'Saad Kazi ke mobile wallet par direct transfer karein aur Transaction ID submit karein.'
+                    : 'Instant Pakistan deposits and cashouts via EasyPaisa and JazzCash.'}
                 </span>
               </div>
 
@@ -406,9 +564,9 @@ export default function App() {
                   sounds.playClick();
                   setWalletOpen(true);
                 }}
-                className="w-full sm:w-auto px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-neutral-950 font-bold whitespace-nowrap transition-all flex items-center justify-center gap-1 shadow-sm"
+                className="w-full sm:w-auto px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-neutral-950 font-bold whitespace-nowrap transition-all flex items-center justify-center gap-1 shadow-sm cursor-pointer"
               >
-                <span>{language === 'ur' ? 'Deposit Karein' : 'Deposit PKR'}</span>
+                <span>{language === 'ur' ? 'Deposit Karein' : 'Deposit via EasyPaisa'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -420,7 +578,7 @@ export default function App() {
                   sounds.playClick();
                   setStatusFilter('all');
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
                   statusFilter === 'all' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
                 }`}
               >
@@ -432,7 +590,7 @@ export default function App() {
                   sounds.playClick();
                   setStatusFilter('room_open');
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
                   statusFilter === 'room_open' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
                 }`}
               >
@@ -445,7 +603,7 @@ export default function App() {
                   sounds.playClick();
                   setStatusFilter('upcoming');
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
                   statusFilter === 'upcoming' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
                 }`}
               >
@@ -458,7 +616,7 @@ export default function App() {
                   sounds.playClick();
                   setStatusFilter('completed');
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
                   statusFilter === 'completed' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
                 }`}
               >
@@ -467,7 +625,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* Tournaments Grid (Zero Horizontal Scroll, Mobile 1-Col, Tablet 2-Col, Desktop 3-Col) */}
+            {/* Tournaments Grid */}
             {filteredTournaments.length === 0 ? (
               <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-10 text-center space-y-3">
                 <Flame className="w-10 h-10 text-neutral-600 mx-auto" />
@@ -482,7 +640,7 @@ export default function App() {
                     setSelectedMode('All');
                     setStatusFilter('all');
                   }}
-                  className="px-4 py-2 text-xs font-semibold rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
+                  className="px-4 py-2 text-xs font-semibold rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 cursor-pointer"
                 >
                   Reset Filters
                 </button>
@@ -494,7 +652,7 @@ export default function App() {
                     key={tournament.id}
                     tournament={tournament}
                     onSelect={(t) => setSelectedTournament(t)}
-                    onJoin={(t) => setJoiningTournament(t)}
+                    onJoin={(t) => handleRegisterTournament(t)}
                     isRegistered={userRegisteredIds.includes(tournament.id)}
                     language={language}
                   />
@@ -510,43 +668,48 @@ export default function App() {
         {/* Tab 3: Points Calculator */}
         {activeTab === 'points' && <PointsCalculator language={language} />}
 
-        {/* Tab 4: Wallet Mobile View (triggered from bottom nav) */}
+        {/* Tab 4: Wallet Mobile View (EasyPaisa & JazzCash) */}
         {activeTab === 'wallet' && (
           <div className="max-w-2xl mx-auto space-y-4">
             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 text-center space-y-4">
-              <span className="text-xs text-neutral-400 uppercase font-semibold">Wallet Balance</span>
+              <span className="text-xs text-neutral-400 uppercase font-semibold">Your Wallet Balance</span>
               <div className="text-4xl font-display font-black text-amber-400 font-mono">
                 Rs. {walletBalance} <span className="text-sm font-sans text-neutral-300">PKR</span>
               </div>
-              <p className="text-xs text-neutral-400">EasyPaisa · JazzCash · Instant Deposit & Cashout</p>
+              <p className="text-xs text-neutral-400">EasyPaisa · JazzCash · Direct Transfer & Instant Approval</p>
               <div className="flex justify-center gap-3 pt-2">
                 <button
                   onClick={() => setWalletOpen(true)}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs shadow-md"
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs shadow-md cursor-pointer"
                 >
-                  Open Deposit & Cashout
+                  Deposit & Cashout
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Tab 5: Player Profile */}
+        {/* Tab 5: Player Profile (Individual player data & logout button) */}
         {activeTab === 'profile' && (
           <PlayerProfileView
             playerIgn={playerIgn}
             playerUid={playerUid}
+            playerEmail={playerEmail}
             walletBalance={walletBalance}
             openWallet={() => setWalletOpen(true)}
             matchesJoinedCount={userRegisteredIds.length}
             language={language}
             setLanguage={setLanguage}
             openAdminLogin={() => setAdminLoginOpen(true)}
+            openAuthModal={() => setAuthModalOpen(true)}
+            onLogout={handleLogout}
+            isLoggedIn={isLoggedIn}
+            onUpdateIgnUid={handleUpdateIgnUid}
           />
         )}
       </main>
 
-      {/* Footer with Responsive Layout & Admin Access Option */}
+      {/* Footer with English links and Admin Panel access */}
       <footer className="border-t border-neutral-900 bg-neutral-950/90 py-6 mt-8 text-xs text-neutral-500 pb-24 md:pb-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 font-display font-bold text-neutral-300">
@@ -583,7 +746,7 @@ export default function App() {
               EasyPaisa / JazzCash Cashout
             </button>
 
-            {/* Admin Access Option in Footer */}
+            {/* Admin Panel Button in Footer (Privacy protected, password entered in modal) */}
             <button
               onClick={() => {
                 sounds.playClick();
@@ -603,7 +766,7 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Mobile Bottom Navigation Bar (100% Mobile First Experience) */}
+      {/* Mobile Bottom Navigation Bar */}
       <MobileBottomNav
         activeTab={activeTab}
         setActiveTab={(tab) => {
@@ -617,13 +780,13 @@ export default function App() {
         language={language}
       />
 
-      {/* Modals */}
+      {/* Tournament Details Modal */}
       <TournamentDetailModal
         tournament={selectedTournament}
         onClose={() => setSelectedTournament(null)}
         onJoin={(t) => {
           setSelectedTournament(null);
-          setJoiningTournament(t);
+          handleRegisterTournament(t);
         }}
         onSubmitProof={(t) => {
           setSelectedTournament(null);
@@ -633,6 +796,7 @@ export default function App() {
         language={language}
       />
 
+      {/* Join Tournament Squad Modal */}
       <JoinTournamentModal
         tournament={joiningTournament}
         onClose={() => setJoiningTournament(null)}
@@ -643,25 +807,47 @@ export default function App() {
           setWalletOpen(true);
         }}
         language={language}
+        initialIgn={playerIgn}
+        initialUid={playerUid}
       />
 
+      {/* Screenshot Match Proof Modal */}
       <SubmitProofModal
         tournament={proofTournament}
         onClose={() => setProofTournament(null)}
         onSubmit={handleSubmitProof}
         language={language}
+        initialIgn={playerIgn}
+        initialUid={playerUid}
       />
 
+      {/* Wallet Modal with EasyPaisa & JazzCash Deposit and Cashout */}
       <WalletModal
         isOpen={walletOpen}
         onClose={() => setWalletOpen(false)}
         balance={walletBalance}
-        transactions={transactions}
+        transactions={userTransactions}
         adminSettings={adminSettings}
         onSubmitDepositRequest={handleSubmitDepositRequest}
         onSubmitWithdrawalRequest={handleSubmitWithdrawalRequest}
         playerIgn={playerIgn}
         playerUid={playerUid}
+        userId={user?.uid}
+        language={language}
+      />
+
+      {/* Registration Feedback Modal (Insufficient Balance, Success, or Already Registered) */}
+      <RegistrationFeedbackModal
+        isOpen={feedbackModal.isOpen}
+        onClose={() => setFeedbackModal((prev) => ({ ...prev, isOpen: false }))}
+        type={feedbackModal.type}
+        tournament={feedbackModal.tournament}
+        walletBalance={walletBalance}
+        openWalletDeposit={() => {
+          setFeedbackModal((prev) => ({ ...prev, isOpen: false }));
+          setWalletOpen(true);
+        }}
+        assignedSlot={feedbackModal.assignedSlot}
         language={language}
       />
 
@@ -675,6 +861,12 @@ export default function App() {
         }}
         validPin={adminSettings.adminPin || '7860'}
         language={language}
+      />
+
+      {/* Player Authentication Modal (Email & Password Login / Signup) */}
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
       />
     </div>
   );

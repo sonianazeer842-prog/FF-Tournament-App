@@ -26,6 +26,7 @@ interface WalletModalProps {
   onSubmitWithdrawalRequest: (req: Omit<WithdrawalRequest, 'id' | 'submittedAt' | 'status'>) => void;
   playerIgn: string;
   playerUid: string;
+  userId?: string;
   language: 'ur' | 'en';
 }
 
@@ -39,6 +40,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   onSubmitWithdrawalRequest,
   playerIgn,
   playerUid,
+  userId,
   language,
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'deposit' | 'withdraw'>('deposit');
@@ -47,6 +49,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const [senderNumber, setSenderNumber] = useState('03451234567');
   const [senderName, setSenderName] = useState('Saad Esports');
   const [trxId, setTrxId] = useState('');
+  const [screenshotName, setScreenshotName] = useState('');
   const [copiedAccount, setCopiedAccount] = useState(false);
   const [depositSuccessMsg, setDepositSuccessMsg] = useState('');
 
@@ -87,6 +90,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
     sounds.playVictory();
     onSubmitDepositRequest({
+      userId,
       playerIgn,
       playerUid,
       amountPkr: depositAmount,
@@ -94,14 +98,16 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       senderNumber,
       senderName,
       trxId: trxId.trim(),
+      screenshotName: screenshotName || `${depositMethod.toLowerCase()}_receipt.jpg`,
     });
 
     setDepositSuccessMsg(
       language === 'ur'
-        ? `Deposit Request (TID: ${trxId}) submit ho gayi hai! Qazi Battle Admin verify karke 5 minute me aapka balance update kar dega.`
-        : `Deposit request submitted! Admin will verify the TID and credit Rs. ${depositAmount} PKR shortly.`
+        ? `Deposit Request (TID: ${trxId}) submit ho gayi hai! Saad Kazi verify karke aapka balance add kar dega.`
+        : `Deposit request submitted with TID ${trxId}! Saad Kazi will verify and credit Rs. ${depositAmount} PKR to your wallet.`
     );
     setTrxId('');
+    setScreenshotName('');
     setErrorMsg('');
   };
 
@@ -310,33 +316,39 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Step 2: Official Receiver Details Box */}
+                  {/* Step 2: Official Receiver Details Box (Saad Kazi) */}
                   <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2">
-                    <span className="text-[10px] uppercase font-semibold text-amber-500 tracking-wider block">
-                      2. Official {depositMethod} Account Details:
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-bold text-amber-500 tracking-wider block">
+                        2. Send Payment To: Saad Kazi ({depositMethod})
+                      </span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20">
+                        100% Direct P2P
+                      </span>
+                    </div>
 
                     <div className="flex items-center justify-between bg-neutral-900 p-2.5 rounded-lg border border-neutral-800">
                       <div>
-                        <span className="text-[10px] text-neutral-400 block">Account Number</span>
+                        <span className="text-[10px] text-neutral-400 block">Saad Kazi Mobile Number</span>
                         <span className="font-mono text-base font-bold text-white tracking-wider">{activeReceiverNumber}</span>
                       </div>
                       <button
                         type="button"
                         onClick={handleCopyReceiver}
-                        className="px-2.5 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold flex items-center gap-1 transition-colors"
+                        className="px-2.5 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                       >
                         {copiedAccount ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                         <span>{copiedAccount ? 'Copied' : 'Copy'}</span>
                       </button>
                     </div>
 
-                    <div className="text-[11px] text-neutral-400">
-                      Account Title: <strong className="text-neutral-200">{activeReceiverTitle}</strong>
+                    <div className="text-[11px] text-neutral-400 flex items-center justify-between">
+                      <span>Account Title: <strong className="text-neutral-200">{activeReceiverTitle}</strong></span>
+                      <span className="text-[10px] text-neutral-500">Official Qazi Battle Admin</span>
                     </div>
 
                     <p className="text-[11px] text-neutral-400 leading-relaxed border-t border-neutral-800/80 pt-2">
-                      Apni <strong>{depositMethod} App</strong> kholein ya <strong>*786#</strong> milayein aur ooper diye gaye number par amount transfer karein.
+                      Apni <strong>{depositMethod} App</strong> kholein aur ooper diye gaye <strong>Saad Kazi</strong> ke number par raqam bhejein. Paise direct Saad Kazi ke wallet me jayenge.
                     </p>
                   </div>
 
@@ -349,7 +361,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                           type="button"
                           key={amt}
                           onClick={() => setDepositAmount(amt)}
-                          className={`py-2 text-center rounded-lg border font-mono font-bold text-xs ${
+                          className={`py-2 text-center rounded-lg border font-mono font-bold text-xs cursor-pointer ${
                             depositAmount === amt
                               ? 'border-amber-500 bg-amber-500 text-neutral-950'
                               : 'border-neutral-800 bg-neutral-950 text-neutral-300'
@@ -411,9 +423,30 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                     />
                   </div>
 
+                  {/* Step 5: Optional Screenshot Upload */}
+                  <div>
+                    <label className="block text-neutral-300 font-semibold mb-1 flex items-center justify-between">
+                      <span>Payment Receipt Screenshot</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">Optional confirmation</span>
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setScreenshotName(e.target.files[0].name);
+                        }
+                      }}
+                      className="w-full text-xs text-neutral-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-neutral-800 file:text-neutral-200 hover:file:bg-neutral-700 bg-neutral-950 border border-neutral-800 rounded-lg p-1.5"
+                    />
+                    {screenshotName && (
+                      <span className="text-[10px] text-emerald-400 mt-1 block">Uploaded: {screenshotName}</span>
+                    )}
+                  </div>
+
                   <button
                     type="submit"
-                    className="w-full py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center justify-center gap-2"
+                    className="w-full py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Send className="w-4 h-4 stroke-[2.5]" />
                     <span>Submit Deposit Request (Rs. {depositAmount} PKR)</span>

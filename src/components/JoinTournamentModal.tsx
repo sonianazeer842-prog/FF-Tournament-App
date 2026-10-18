@@ -11,6 +11,8 @@ interface JoinTournamentModalProps {
   walletBalance: number;
   openWallet: () => void;
   language: 'ur' | 'en';
+  initialIgn?: string;
+  initialUid?: string;
 }
 
 export const JoinTournamentModal: React.FC<JoinTournamentModalProps> = ({
@@ -20,14 +22,23 @@ export const JoinTournamentModal: React.FC<JoinTournamentModalProps> = ({
   walletBalance,
   openWallet,
   language,
+  initialIgn = 'SOUL・Predator',
+  initialUid = '284918294',
 }) => {
-  const [ign, setIgn] = useState('SOUL・Predator');
-  const [uid, setUid] = useState('284918294');
+  const [ign, setIgn] = useState(initialIgn);
+  const [uid, setUid] = useState(initialUid);
   const [teamName, setTeamName] = useState('Team Soul');
   const [teammate1, setTeammate1] = useState('SOUL・Blaze');
   const [teammate2, setTeammate2] = useState('SOUL・Viper');
   const [teammate3, setTeammate3] = useState('SOUL・Echo');
   const [error, setError] = useState('');
+
+  React.useEffect(() => {
+    if (tournament) {
+      if (initialIgn) setIgn(initialIgn);
+      if (initialUid) setUid(initialUid);
+    }
+  }, [tournament, initialIgn, initialUid]);
 
   if (!tournament) return null;
 

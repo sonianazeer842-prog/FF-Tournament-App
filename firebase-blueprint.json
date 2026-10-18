@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered player profile including Free Fire IGN, UID, and wallet balance",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "User Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Player In-Game Name (IGN)" },
+        "ffUid": { "type": "string", "description": "Free Fire numeric player UID" },
+        "phone": { "type": "string", "description": "Phone number for EasyPaisa / JazzCash" },
+        "walletBalance": { "type": "number", "description": "Current wallet balance in PKR" },
+        "role": { "type": "string", "enum": ["player", "admin"], "description": "User role" },
+        "registeredTournaments": { "type": "array", "description": "List of tournament IDs player joined" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of account creation" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "required": ["id", "email", "displayName", "ffUid", "walletBalance", "role"]
+    },
+    "DepositRequest": {
+      "title": "DepositRequest",
+      "description": "EasyPaisa or JazzCash deposit payment proof submitted by player",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Request ID" },
+        "userId": { "type": "string", "description": "Player User ID" },
+        "playerIgn": { "type": "string", "description": "Player Free Fire IGN" },
+        "playerUid": { "type": "string", "description": "Player Free Fire numeric UID" },
+        "amountPkr": { "type": "number", "description": "Deposit amount in PKR" },
+        "method": { "type": "string", "enum": ["EasyPaisa", "JazzCash"], "description": "Payment method" },
+        "senderNumber": { "type": "string", "description": "Sender mobile number" },
+        "senderName": { "type": "string", "description": "Sender account title" },
+        "trxId": { "type": "string", "description": "Transaction ID from SMS" },
+        "screenshotName": { "type": "string", "description": "Screenshot file name" },
+        "submittedAt": { "type": "string", "description": "Submission time" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"], "description": "Approval status" }
+      },
+      "required": ["id", "userId", "amountPkr", "method", "trxId", "status"]
+    },
+    "WithdrawalRequest": {
+      "title": "WithdrawalRequest",
+      "description": "Cashout request submitted by player to their EasyPaisa or JazzCash account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Request ID" },
+        "userId": { "type": "string", "description": "Player User ID" },
+        "playerIgn": { "type": "string", "description": "Player Free Fire IGN" },
+        "playerUid": { "type": "string", "description": "Player Free Fire numeric UID" },
+        "amountPkr": { "type": "number", "description": "Withdrawal amount in PKR" },
+        "method": { "type": "string", "enum": ["EasyPaisa", "JazzCash"], "description": "Cashout method" },
+        "accountNumber": { "type": "string", "description": "Recipient account number" },
+        "accountTitle": { "type": "string", "description": "Recipient account title" },
+        "submittedAt": { "type": "string", "description": "Submission time" },
+        "status": { "type": "string", "enum": ["pending", "completed", "rejected"], "description": "Status" }
+      },
+      "required": ["id", "userId", "amountPkr", "method", "accountNumber", "accountTitle", "status"]
+    },
+    "Tournament": {
+      "title": "Tournament",
+      "description": "Free Fire Esports tournament document with live custom room distribution",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Tournament ID" },
+        "title": { "type": "string", "description": "Tournament title" },
+        "mode": { "type": "string", "description": "Solo, Duo, Squad, Clash Squad" },
+        "map": { "type": "string", "description": "Map name" },
+        "server": { "type": "string", "description": "Server region" },
+        "entryFee": { "type": "number", "description": "Fee in PKR" },
+        "prizePool": { "type": "number", "description": "Prize pool in PKR" },
+        "maxSlots": { "type": "number", "description": "Max teams/slots" },
+        "registeredCount": { "type": "number", "description": "Registered count" },
+        "players": { "type": "array", "description": "Array of registered user UIDs" },
+        "slots": { "type": "array", "description": "List of player slots" },
+        "roomId": { "type": "string", "description": "Custom room ID" },
+        "roomPassword": { "type": "string", "description": "Custom room password" },
+        "roomRevealed": { "type": "boolean", "description": "Whether room is broadcasted" },
+        "status": { "type": "string", "description": "upcoming, room_open, live, completed" }
+      },
+      "required": ["id", "title", "entryFee", "prizePool", "maxSlots", "registeredCount"]
+    },
+    "AdminPaymentSettings": {
+      "title": "AdminPaymentSettings",
+      "description": "Saad Kazi's personal receiving account credentials for EasyPaisa and JazzCash",
+      "type": "object",
+      "properties": {
+        "easypaisaNumber": { "type": "string", "description": "Admin EasyPaisa Number" },
+        "easypaisaTitle": { "type": "string", "description": "Admin EasyPaisa Account Title" },
+        "jazzcashNumber": { "type": "string", "description": "Admin JazzCash Number" },
+        "jazzcashTitle": { "type": "string", "description": "Admin JazzCash Account Title" },
+        "adminPin": { "type": "string", "description": "Admin security PIN" },
+        "supportWhatsapp": { "type": "string", "description": "Support WhatsApp" },
+        "merchantApiEnabled": { "type": "boolean", "description": "Future merchant API switch" },
+        "updatedAt": { "type": "string", "description": "Last updated timestamp" }
+      },
+      "required": ["easypaisaNumber", "easypaisaTitle", "jazzcashNumber", "jazzcashTitle"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Player profile and individual wallet balance document"
+    },
+    "/users/{userId}/transactions/{txId}": {
+      "schema": "WalletTransaction",
+      "description": "Individual player transaction ledger"
+    },
+    "/deposit_requests/{depId}": {
+      "schema": "DepositRequest",
+      "description": "Player deposit requests verified by admin Saad Kazi"
+    },
+    "/withdrawal_requests/{wdrId}": {
+      "schema": "WithdrawalRequest",
+      "description": "Player cashout requests processed by admin"
+    },
+    "/tournaments/{tournId}": {
+      "schema": "Tournament",
+      "description": "Tournament matches with player UID registrations and room credentials"
+    },
+    "/settings/admin_payment": {
+      "schema": "AdminPaymentSettings",
+      "description": "Saad Kazi's personal JazzCash and EasyPaisa wallet receiving numbers"
+    }
+  }
+}

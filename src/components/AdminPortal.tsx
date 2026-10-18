@@ -111,10 +111,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Settings edit form
   const [epNumber, setEpNumber] = useState(adminSettings.easypaisaNumber);
-  const [epTitle, setEpTitle] = useState(adminSettings.easypaisaTitle);
+  const [epTitle, setEpTitle] = useState(adminSettings.easypaisaTitle || 'Saad Kazi (Qazi Battle Official)');
   const [jcNumber, setJcNumber] = useState(adminSettings.jazzcashNumber);
-  const [jcTitle, setJcTitle] = useState(adminSettings.jazzcashTitle);
+  const [jcTitle, setJcTitle] = useState(adminSettings.jazzcashTitle || 'Saad Kazi');
   const [adminPin, setAdminPin] = useState(adminSettings.adminPin);
+  const [supportWhatsapp, setSupportWhatsapp] = useState(adminSettings.supportWhatsapp || '+92 345 9876543');
+  const [merchantApiEnabled, setMerchantApiEnabled] = useState(adminSettings.merchantApiEnabled || false);
+  const [merchantApiKey, setMerchantApiKey] = useState(adminSettings.merchantApiKey || '');
+  const [merchantStoreId, setMerchantStoreId] = useState(adminSettings.merchantStoreId || '');
+
+  React.useEffect(() => {
+    setEpNumber(adminSettings.easypaisaNumber);
+    setEpTitle(adminSettings.easypaisaTitle || 'Saad Kazi (Qazi Battle Official)');
+    setJcNumber(adminSettings.jazzcashNumber);
+    setJcTitle(adminSettings.jazzcashTitle || 'Saad Kazi');
+    setAdminPin(adminSettings.adminPin);
+    setSupportWhatsapp(adminSettings.supportWhatsapp || '+92 345 9876543');
+    setMerchantApiEnabled(adminSettings.merchantApiEnabled || false);
+  }, [adminSettings]);
 
   // Lockout timer check on mount & interval
   React.useEffect(() => {
@@ -265,15 +279,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateSettings({
-      easypaisaNumber: epNumber,
-      easypaisaTitle: epTitle,
-      jazzcashNumber: jcNumber,
-      jazzcashTitle: jcTitle,
+      easypaisaNumber: epNumber.trim(),
+      easypaisaTitle: epTitle.trim(),
+      jazzcashNumber: jcNumber.trim(),
+      jazzcashTitle: jcTitle.trim(),
       adminPin: adminPin || '7860',
-      supportWhatsapp: adminSettings.supportWhatsapp,
+      supportWhatsapp: supportWhatsapp.trim(),
+      merchantApiEnabled,
+      merchantApiKey: merchantApiKey.trim(),
+      merchantStoreId: merchantStoreId.trim(),
     });
     sounds.playVictory();
-    showToast(language === 'ur' ? 'EasyPaisa aur JazzCash account settings save ho gayi!' : 'Pakistan Payment Gateway accounts saved!');
+    showToast(language === 'ur' ? 'Saad Kazi ke EasyPaisa aur JazzCash accounts save ho gaye!' : 'Saad Kazi payment accounts saved successfully!');
   };
 
   // If locked, show security gate
@@ -510,12 +527,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             sounds.playClick();
             setActiveTab('settings');
           }}
-          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1 ${
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 ${
             activeTab === 'settings' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}
         >
           <Settings className="w-3.5 h-3.5" />
-          <span>Payment Accounts</span>
+          <span>Admin Payment Settings</span>
+          <span className="px-1.5 py-0.2 rounded bg-neutral-900 text-amber-400 font-bold text-[9px]">Saad Kazi</span>
         </button>
       </div>
 
@@ -979,26 +997,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </div>
       )}
 
-      {/* Tab 6: Pakistan Payment Gateway Settings */}
+      {/* Tab 6: Admin Payment Settings (For Saad Kazi) */}
       {activeTab === 'settings' && (
-        <form onSubmit={handleSaveSettings} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5">
-          <div>
-            <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
-              <Settings className="w-5 h-5 text-amber-500" />
-              <span>EasyPaisa & JazzCash Receiver Settings (Pakistan)</span>
-            </h3>
-            <p className="text-xs text-neutral-400 mt-1">
-              {language === 'ur'
-                ? 'Yahan apna EasyPaisa aur JazzCash account number aur title enter karein. Jab bhi koi player deposit karega, usko ye number show hoga.'
-                : 'Configure your official EasyPaisa & JazzCash account numbers. Contenders will see these details to send PKR.'}
-            </p>
+        <form onSubmit={handleSaveSettings} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800 pb-4">
+            <div>
+              <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
+                <Settings className="w-5 h-5 text-amber-500" />
+                <span>Admin Payment Settings (Saad Kazi Receiving Wallets)</span>
+              </h3>
+              <p className="text-xs text-neutral-400 mt-1">
+                {language === 'ur'
+                  ? 'Yahan Saad Kazi apna EasyPaisa aur JazzCash number save karein. Ye numbers public Player App mein Wallet Page par "Send Payment To" ke taur par show honge. 100% paise direct Saad Kazi ke mobile wallet me jayenge.'
+                  : 'Configure Saad Kazi’s personal EasyPaisa and JazzCash receiving wallets. Contenders send payments directly to these mobile accounts and input their TID.'}
+              </p>
+            </div>
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold text-xs shrink-0 flex items-center gap-1.5">
+              <Check className="w-3.5 h-3.5" />
+              <span>100% Direct P2P Transfer Active</span>
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="p-4 rounded-xl bg-neutral-950 border border-emerald-900/40 space-y-3">
-              <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs">
-                <Smartphone className="w-4 h-4" />
-                <span>EasyPaisa Official Receiver Account</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {/* EasyPaisa Box */}
+            <div className="p-4 rounded-xl bg-neutral-950 border border-emerald-900/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs">
+                  <Smartphone className="w-4 h-4" />
+                  <span>EasyPaisa Receiving Account</span>
+                </div>
+                <span className="text-[10px] text-neutral-500 font-mono">Telenor Bank</span>
               </div>
 
               <div>
@@ -1008,7 +1036,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   required
                   value={epNumber}
                   onChange={(e) => setEpNumber(e.target.value)}
-                  placeholder="e.g. 0345-9876543"
+                  placeholder="0345-9876543"
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -1020,16 +1048,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   required
                   value={epTitle}
                   onChange={(e) => setEpTitle(e.target.value)}
-                  placeholder="e.g. Muhammad Qazi"
+                  placeholder="Saad Kazi (Qazi Battle Official)"
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-neutral-950 border border-red-900/40 space-y-3">
-              <div className="flex items-center gap-2 font-bold text-red-400 text-xs">
-                <Smartphone className="w-4 h-4" />
-                <span>JazzCash Official Receiver Account</span>
+            {/* JazzCash Box */}
+            <div className="p-4 rounded-xl bg-neutral-950 border border-red-900/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-red-400 text-xs">
+                  <Smartphone className="w-4 h-4" />
+                  <span>JazzCash Receiving Account</span>
+                </div>
+                <span className="text-[10px] text-neutral-500 font-mono">Mobilink Bank</span>
               </div>
 
               <div>
@@ -1039,7 +1071,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   required
                   value={jcNumber}
                   onChange={(e) => setJcNumber(e.target.value)}
-                  placeholder="e.g. 0302-1234567"
+                  placeholder="0302-1234567"
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100 focus:outline-none focus:border-red-500"
                 />
               </div>
@@ -1051,31 +1083,97 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   required
                   value={jcTitle}
                   onChange={(e) => setJcTitle(e.target.value)}
-                  placeholder="e.g. Qazi Battle Management"
+                  placeholder="Saad Kazi"
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-100 focus:outline-none focus:border-red-500"
                 />
               </div>
             </div>
 
-            <div className="sm:col-span-2">
+            {/* WhatsApp Support & Admin PIN */}
+            <div>
+              <label className="block text-xs font-semibold text-neutral-300 mb-1">Official WhatsApp Support Number</label>
+              <input
+                type="text"
+                value={supportWhatsapp}
+                onChange={(e) => setSupportWhatsapp(e.target.value)}
+                placeholder="+92 345 9876543"
+                className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-neutral-100 font-mono focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
               <label className="block text-xs font-semibold text-neutral-300 mb-1">Admin Security PIN</label>
               <input
                 type="text"
                 value={adminPin}
                 onChange={(e) => setAdminPin(e.target.value)}
                 placeholder="7860"
-                className="w-full sm:w-64 px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+                className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
               />
+            </div>
+
+            {/* Future Merchant API Gateway Switch */}
+            <div className="sm:col-span-2 p-4 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-amber-500" />
+                    <span>Future Direct Merchant API Gateway</span>
+                  </h4>
+                  <p className="text-[11px] text-neutral-400 mt-0.5">
+                    Agar mustaqbil me EasyPaisa / JazzCash Merchant Merchant IPN/API credentials mil jayein to yahan se automate kar sakte hain. Filhal direct mobile transfer 100% active hai.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={merchantApiEnabled}
+                    onChange={(e) => setMerchantApiEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+              </div>
+
+              {merchantApiEnabled && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-neutral-800">
+                  <div>
+                    <label className="block text-[10px] text-neutral-400 mb-1">Merchant Store ID</label>
+                    <input
+                      type="text"
+                      value={merchantStoreId}
+                      onChange={(e) => setMerchantStoreId(e.target.value)}
+                      placeholder="e.g. EP-STORE-9921"
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-neutral-400 mb-1">Merchant Secret Key / Hash</label>
+                    <input
+                      type="password"
+                      value={merchantApiKey}
+                      onChange={(e) => setMerchantApiKey(e.target.value)}
+                      placeholder="••••••••••••••••"
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <button
-            type="submit"
-            className="px-6 py-2.5 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center gap-2"
-          >
-            <Check className="w-4 h-4 stroke-[2.5]" />
-            <span>Save Payment Gateway Accounts</span>
-          </button>
+          <div className="flex items-center justify-between pt-2 border-t border-neutral-800">
+            <span className="text-[11px] text-neutral-400">
+              Numbers will update immediately across the entire player app.
+            </span>
+            <button
+              type="submit"
+              className="px-6 py-2.5 rounded-xl font-bold text-xs bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center gap-2 cursor-pointer"
+            >
+              <Check className="w-4 h-4 stroke-[2.5]" />
+              <span>Save Saad Kazi Payment Settings</span>
+            </button>
+          </div>
         </form>
       )}
     </div>

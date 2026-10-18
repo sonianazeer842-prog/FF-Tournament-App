@@ -8,6 +8,8 @@ interface SubmitProofModalProps {
   onClose: () => void;
   onSubmit: (submission: MatchProofSubmission) => void;
   language: 'ur' | 'en';
+  initialIgn?: string;
+  initialUid?: string;
 }
 
 export const SubmitProofModal: React.FC<SubmitProofModalProps> = ({
@@ -15,13 +17,22 @@ export const SubmitProofModal: React.FC<SubmitProofModalProps> = ({
   onClose,
   onSubmit,
   language,
+  initialIgn = 'SOUL・Predator',
+  initialUid = '284918294',
 }) => {
-  const [playerIgn, setPlayerIgn] = useState('SOUL・Predator');
-  const [playerUid, setPlayerUid] = useState('284918294');
+  const [playerIgn, setPlayerIgn] = useState(initialIgn);
+  const [playerUid, setPlayerUid] = useState(initialUid);
   const [rank, setRank] = useState(1);
   const [kills, setKills] = useState(5);
   const [fileName, setFileName] = useState('ff_match_result_screenshot.png');
   const [isSuccess, setIsSuccess] = useState(false);
+
+  React.useEffect(() => {
+    if (tournament) {
+      if (initialIgn) setPlayerIgn(initialIgn);
+      if (initialUid) setPlayerUid(initialUid);
+    }
+  }, [tournament, initialIgn, initialUid]);
 
   if (!tournament) return null;
 
