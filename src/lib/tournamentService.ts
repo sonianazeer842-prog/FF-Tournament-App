@@ -5,6 +5,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   increment,
   arrayUnion,
@@ -19,6 +20,8 @@ import {
   WithdrawalRequest,
   AdminPaymentSettings,
   WalletTransaction,
+  UserProfile,
+  CompletedRoom,
 } from '../types/tournament';
 import {
   INITIAL_TOURNAMENTS,
@@ -120,6 +123,20 @@ export async function registerPlayerForTournament(
   playerUid: string,
   currentBalance: number
 ): Promise<{ success: boolean; error?: string; assignedSlot?: PlayerSlot }> {
+  // Check if player account is blocked by Admin
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userDocRef);
+    if (userSnap.exists() && userSnap.data()?.isBlocked) {
+      return {
+        success: false,
+        error: 'account_blocked',
+      };
+    }
+  } catch (e) {
+    console.warn('Could not check user blocked status:', e);
+  }
+
   // 1. Prevent double registration
   if (tournament.players?.includes(userId)) {
     return {
@@ -156,11 +173,12 @@ export async function registerPlayerForTournament(
   };
 
   try {
-    // A. Deduct Fee from Player's Wallet & Record Transaction
+    // A. Deduct Fee from Player's Wallet & Record Transaction & Increment matches played
     const userDocRef = doc(db, 'users', userId);
     await updateDoc(userDocRef, {
       walletBalance: increment(-tournament.entryFee),
       registeredTournaments: arrayUnion(tournament.id),
+      totalMatchesPlayed: increment(1),
       updatedAt: new Date().toISOString(),
     });
 
@@ -408,3 +426,146 @@ export async function saveAdminSettingsInDb(settings: AdminPaymentSettings) {
     updatedAt: new Date().toISOString(),
   });
 }
+
+// ==========================================
+// 6. Custom Room / Tournament Delete & Recreate & History
+// ==========================================
+
+export async function deleteTournamentInDb(
+  tournament: Tournament,
+  reason: 'finished' | 'canceled_by_admin' | 'deleted' = 'deleted'
+) {
+  // Archive into completed_rooms
+  const completedRoom: CompletedRoom = {
+    id: `comp-${tournament.id}-${Date.now()}`,
+    originalTournamentId: tournament.id,
+    title: tournament.title,
+    mode: tournament.mode,
+    map: tournament.map,
+    server: tournament.server || 'Pakistan',
+    entryFee: tournament.entryFee,
+    prizePool: tournament.prizePool,
+    prizeBreakdown: tournament.prizeBreakdown,
+    maxSlots: tournament.maxSlots,
+    registeredCount: tournament.registeredCount || 0,
+    slots: tournament.slots || [],
+    players: tournament.players || [],
+    startTime: tournament.startTime,
+    completedAt: new Date().toISOString(),
+    status: 'completed',
+    roomId: tournament.roomId,
+    winnerTeam: tournament.winnerTeam,
+    winnerBooyahIgn: tournament.winnerBooyahIgn,
+    deletedReason: reason,
+  };
+
+  const archiveRef = doc(db, 'completed_rooms', completedRoom.id);
+  await setDoc(archiveRef, completedRoom);
+
+  // Remove from active tournaments collection
+  const tournRef = doc(db, 'tournaments', tournament.id);
+  await deleteDoc(tournRef);
+}
+
+export async function recreateTournamentInDb(
+  original: Tournament | CompletedRoom,
+  overrides?: Partial<Tournament>
+): Promise<Tournament> {
+  const newId = `cr-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+  // Default start time: 30 minutes from now if previous was in past
+  const defaultStartTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+  const newTournament: Tournament = {
+    id: newId,
+    title: overrides?.title || original.title,
+    mode: overrides?.mode || original.mode,
+    map: overrides?.map || original.map,
+    server: 'Pakistan',
+    entryFee: overrides?.entryFee !== undefined ? overrides.entryFee : original.entryFee,
+    prizePool: overrides?.prizePool !== undefined ? overrides.prizePool : original.prizePool,
+    prizeBreakdown: overrides?.prizeBreakdown || original.prizeBreakdown,
+    maxSlots: overrides?.maxSlots !== undefined ? overrides.maxSlots : original.maxSlots,
+    registeredCount: 0,
+    slots: [],
+    players: [],
+    startTime: overrides?.startTime || defaultStartTime,
+    status: 'upcoming',
+    roomId: overrides?.roomId || '',
+    roomPassword: overrides?.roomPassword || '',
+    roomRevealed: false,
+    version: overrides?.version || (original as Tournament).version || 'Mobile Only',
+    isCustomRoom: overrides?.isCustomRoom !== undefined ? overrides.isCustomRoom : (original as Tournament).isCustomRoom ?? true,
+    customRoomType: (overrides?.customRoomType || (original as Tournament).customRoomType || original.mode) as any,
+    rules: overrides?.rules || (original as Tournament).rules || {
+      gunAttributes: false,
+      characterSkills: true,
+      limitedAmmo: true,
+      emulatorAllowed: false,
+      customNote: 'Custom Match Official Rules. Emulators blocked.',
+    },
+  };
+
+  const docRef = doc(db, 'tournaments', newId);
+  await setDoc(docRef, newTournament);
+  return newTournament;
+}
+
+export function subscribeCompletedRooms(onUpdate: (rooms: CompletedRoom[]) => void) {
+  const colRef = collection(db, 'completed_rooms');
+
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const list: CompletedRoom[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...d.data() } as CompletedRoom);
+      });
+      // Sort latest completed first
+      list.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+      onUpdate(list);
+    },
+    (err) => {
+      console.error('Error subscribing to completed_rooms:', err);
+      onUpdate([]);
+    }
+  );
+}
+
+// ==========================================
+// 7. User Management (All Users & Block System)
+// ==========================================
+
+export function subscribeAllUsers(onUpdate: (users: UserProfile[]) => void) {
+  const usersCol = collection(db, 'users');
+
+  return onSnapshot(
+    usersCol,
+    (snapshot) => {
+      const list: UserProfile[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...d.data() } as UserProfile);
+      });
+      // Sort newest users first
+      list.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+      onUpdate(list);
+    },
+    (err) => {
+      console.error('Error subscribing to all users:', err);
+      onUpdate([]);
+    }
+  );
+}
+
+export async function toggleBlockUserInDb(userId: string, isBlocked: boolean) {
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, {
+    isBlocked,
+    updatedAt: new Date().toISOString(),
+  });
+}
+

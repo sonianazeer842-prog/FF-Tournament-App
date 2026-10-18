@@ -37,6 +37,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Completed & Archived Rooms
+    match /completed_rooms/{roomId} {
+      allow read, write: if true;
+    }
+
     // Connection testing
     match /test/{docId} {
       allow read, write: if true;

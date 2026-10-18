@@ -1,5 +1,22 @@
-export type MatchMode = 'Solo' | 'Duo' | 'Squad' | 'Clash Squad';
-export type MatchMap = 'Bermuda' | 'Purgatory' | 'Kalahari' | 'Alpine' | 'NexTerra';
+export type CustomRoomType =
+  | '1v1'
+  | '2v2'
+  | '3v3'
+  | '4v4'
+  | '1v2'
+  | '1v3'
+  | '2v3'
+  | 'Full Map Custom'
+  | 'Lone Wolf';
+
+export type MatchMode =
+  | 'Solo'
+  | 'Duo'
+  | 'Squad'
+  | 'Clash Squad'
+  | CustomRoomType;
+
+export type MatchMap = 'Bermuda' | 'Purgatory' | 'Kalahari' | 'Craftland' | 'Alpine' | 'NexTerra';
 export type MatchStatus = 'upcoming' | 'room_open' | 'live' | 'completed';
 
 export interface PlayerSlot {
@@ -39,6 +56,8 @@ export interface Tournament {
   roomPassword?: string;
   roomRevealed: boolean;
   version: 'Mobile Only' | 'All Devices' | 'PC Blocked';
+  isCustomRoom?: boolean;
+  customRoomType?: CustomRoomType;
   rules: {
     gunAttributes: boolean;
     characterSkills: boolean;
@@ -48,6 +67,29 @@ export interface Tournament {
   };
   winnerTeam?: string;
   winnerBooyahIgn?: string;
+}
+
+export interface CompletedRoom {
+  id: string;
+  originalTournamentId: string;
+  title: string;
+  mode: MatchMode;
+  map: MatchMap;
+  server: string;
+  entryFee: number;
+  prizePool: number;
+  prizeBreakdown: PrizeBreakdown;
+  maxSlots: number;
+  registeredCount: number;
+  slots: PlayerSlot[];
+  players?: string[];
+  startTime: string;
+  completedAt: string;
+  status: MatchStatus;
+  roomId?: string;
+  winnerTeam?: string;
+  winnerBooyahIgn?: string;
+  deletedReason?: 'finished' | 'canceled_by_admin' | 'deleted';
 }
 
 export interface MatchProofSubmission {
@@ -140,6 +182,8 @@ export interface UserProfile {
   walletBalance: number;
   role: 'player' | 'admin';
   registeredTournaments?: string[];
+  totalMatchesPlayed?: number;
+  isBlocked?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
