@@ -498,12 +498,12 @@ export const INITIAL_WITHDRAWAL_REQUESTS = [
 ];
 
 export const INITIAL_ADMIN_SETTINGS = {
-  easypaisaNumber: '0345-9876543',
+  easypaisaNumber: '03182655142',
   easypaisaTitle: 'Saad Kazi (Qazi Battle Official)',
-  jazzcashNumber: '0302-1234567',
+  jazzcashNumber: '03182655142',
   jazzcashTitle: 'Saad Kazi',
   adminPin: '7860',
-  supportWhatsapp: '+92 345 9876543',
+  supportWhatsapp: '+92 318 2655142',
   merchantApiEnabled: false,
 };
 

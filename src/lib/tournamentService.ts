@@ -22,11 +22,14 @@ import {
   WalletTransaction,
   UserProfile,
   CompletedRoom,
+  MatchProofSubmission,
 } from '../types/tournament';
 import {
   INITIAL_TOURNAMENTS,
   INITIAL_ADMIN_SETTINGS,
   INITIAL_DEPOSIT_REQUESTS,
+  INITIAL_WITHDRAWAL_REQUESTS,
+  INITIAL_PENDING_PROOFS,
 } from '../data/mockTournaments';
 
 // ==========================================
@@ -110,6 +113,37 @@ export async function declareWinnerInDb(
     winnerBooyahIgn,
     status: 'completed',
   });
+}
+
+export async function updateTournamentInDb(
+  tournamentId: string,
+  updates: Partial<Tournament>
+) {
+  const docRef = doc(db, 'tournaments', tournamentId);
+  await updateDoc(docRef, {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function duplicateTournamentInDb(tournament: Tournament): Promise<Tournament> {
+  const newId = `ff-tourn-${Date.now()}`;
+  const copyTitle = tournament.title.startsWith('[Copy]') ? tournament.title : `[Copy] ${tournament.title}`;
+  const duplicate: Tournament = {
+    ...tournament,
+    id: newId,
+    title: copyTitle,
+    registeredCount: 0,
+    slots: [],
+    players: [],
+    status: 'upcoming',
+    startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    roomId: `FF-${Math.floor(100000 + Math.random() * 900000)}`,
+    roomPassword: `QAZI_${Math.floor(1000 + Math.random() * 9000)}`,
+    roomRevealed: false,
+  };
+  await setDoc(doc(db, 'tournaments', newId), duplicate);
+  return duplicate;
 }
 
 // ==========================================
@@ -307,6 +341,20 @@ export async function rejectDepositInDb(depositId: string) {
   const depRef = doc(db, 'deposit_requests', depositId);
   await updateDoc(depRef, {
     status: 'rejected',
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function deleteDepositInDb(depositId: string) {
+  const depRef = doc(db, 'deposit_requests', depositId);
+  await deleteDoc(depRef);
+}
+
+export async function updateDepositAmountInDb(depositId: string, newAmount: number) {
+  const depRef = doc(db, 'deposit_requests', depositId);
+  await updateDoc(depRef, {
+    amountPkr: newAmount,
+    updatedAt: new Date().toISOString(),
   });
 }
 
@@ -319,15 +367,29 @@ export function subscribeWithdrawalRequests(onUpdate: (requests: WithdrawalReque
 
   return onSnapshot(
     colRef,
-    (snapshot) => {
+    async (snapshot) => {
+      if (snapshot.empty) {
+        // Seed initial withdrawals
+        for (const wdr of INITIAL_WITHDRAWAL_REQUESTS) {
+          await setDoc(doc(db, 'withdrawal_requests', wdr.id), wdr);
+        }
+        return;
+      }
+
       const list: WithdrawalRequest[] = [];
       snapshot.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as WithdrawalRequest);
+      });
+      list.sort((a, b) => {
+        if (a.status === 'pending' && b.status !== 'pending') return -1;
+        if (a.status !== 'pending' && b.status === 'pending') return 1;
+        return b.id.localeCompare(a.id);
       });
       onUpdate(list);
     },
     (err) => {
       console.error('Error subscribing to withdrawals:', err);
+      onUpdate(INITIAL_WITHDRAWAL_REQUESTS);
     }
   );
 }
@@ -370,11 +432,20 @@ export async function submitWithdrawalInDb(
   return newReq;
 }
 
+export async function approveWithdrawalInDb(withdrawalId: string) {
+  const docRef = doc(db, 'withdrawal_requests', withdrawalId);
+  await updateDoc(docRef, {
+    status: 'approved',
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export async function completeWithdrawalInDb(withdrawalId: string, referenceId: string) {
   const docRef = doc(db, 'withdrawal_requests', withdrawalId);
   await updateDoc(docRef, {
     status: 'completed',
     referenceId,
+    updatedAt: new Date().toISOString(),
   });
 }
 
@@ -382,6 +453,7 @@ export async function rejectWithdrawalInDb(withdrawal: WithdrawalRequest) {
   const docRef = doc(db, 'withdrawal_requests', withdrawal.id);
   await updateDoc(docRef, {
     status: 'rejected',
+    updatedAt: new Date().toISOString(),
   });
 
   // Refund balance if rejected
@@ -394,19 +466,36 @@ export async function rejectWithdrawalInDb(withdrawal: WithdrawalRequest) {
   }
 }
 
+export async function deleteWithdrawalInDb(withdrawalId: string) {
+  const docRef = doc(db, 'withdrawal_requests', withdrawalId);
+  await deleteDoc(docRef);
+}
+
 // ==========================================
 // 5. Saad Kazi Admin Payment Settings
 // ==========================================
 
 export function subscribeAdminSettings(onUpdate: (settings: AdminPaymentSettings) => void) {
   const docRef = doc(db, 'settings', 'admin_payment');
+  const adminSettingsRef = doc(db, 'adminSettings', 'payment');
 
   return onSnapshot(
     docRef,
     async (snap) => {
       if (!snap.exists()) {
+        try {
+          const snap2 = await getDoc(adminSettingsRef);
+          if (snap2.exists()) {
+            onUpdate(snap2.data() as AdminPaymentSettings);
+            return;
+          }
+        } catch {}
+
         console.log('Initializing Saad Kazi Admin Payment Settings in Firestore...');
         await setDoc(docRef, INITIAL_ADMIN_SETTINGS);
+        try {
+          await setDoc(adminSettingsRef, INITIAL_ADMIN_SETTINGS);
+        } catch {}
         onUpdate(INITIAL_ADMIN_SETTINGS);
         return;
       }
@@ -420,11 +509,16 @@ export function subscribeAdminSettings(onUpdate: (settings: AdminPaymentSettings
 }
 
 export async function saveAdminSettingsInDb(settings: AdminPaymentSettings) {
-  const docRef = doc(db, 'settings', 'admin_payment');
-  await setDoc(docRef, {
+  const payload = {
     ...settings,
     updatedAt: new Date().toISOString(),
-  });
+  };
+  const docRef1 = doc(db, 'settings', 'admin_payment');
+  const docRef2 = doc(db, 'adminSettings', 'payment');
+  await Promise.all([
+    setDoc(docRef1, payload),
+    setDoc(docRef2, payload),
+  ]);
 }
 
 // ==========================================
@@ -568,4 +662,178 @@ export async function toggleBlockUserInDb(userId: string, isBlocked: boolean) {
     updatedAt: new Date().toISOString(),
   });
 }
+
+// ==========================================
+// 8. Match Proofs & Result Distribution in Firestore
+// ==========================================
+
+export function subscribeMatchProofs(onUpdate: (proofs: MatchProofSubmission[]) => void) {
+  const colRef = collection(db, 'match_proofs');
+
+  return onSnapshot(
+    colRef,
+    async (snapshot) => {
+      if (snapshot.empty) {
+        // Seed initial mock proofs for admin testing
+        for (const p of INITIAL_PENDING_PROOFS) {
+          await setDoc(doc(db, 'match_proofs', p.id), p);
+        }
+        return;
+      }
+
+      const list: MatchProofSubmission[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...d.data() } as MatchProofSubmission);
+      });
+
+      list.sort((a, b) => {
+        if (a.status === 'pending' && b.status !== 'pending') return -1;
+        if (a.status !== 'pending' && b.status === 'pending') return 1;
+        return b.id.localeCompare(a.id);
+      });
+
+      onUpdate(list);
+    },
+    (err) => {
+      console.error('Error subscribing to match proofs:', err);
+      onUpdate(INITIAL_PENDING_PROOFS);
+    }
+  );
+}
+
+export async function submitMatchProofInDb(proof: MatchProofSubmission) {
+  const docRef = doc(db, 'match_proofs', proof.id);
+  await setDoc(docRef, {
+    ...proof,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export async function updateMatchProofInDb(
+  proofId: string,
+  updates: Partial<MatchProofSubmission>
+) {
+  const docRef = doc(db, 'match_proofs', proofId);
+  await updateDoc(docRef, {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function deleteMatchProofInDb(proofId: string) {
+  const docRef = doc(db, 'match_proofs', proofId);
+  await deleteDoc(docRef);
+}
+
+export async function distributePrizeToWinnerInDb(options: {
+  winnerIgn: string;
+  winnerUid?: string;
+  userId?: string;
+  amountPkr: number;
+  tournamentTitle?: string;
+  tournamentId?: string;
+  proofId?: string;
+}): Promise<{ success: boolean; creditedUser?: string; message: string }> {
+  let targetUserId = options.userId;
+
+  // Search users collection if user ID isn't directly passed
+  try {
+    const usersCol = collection(db, 'users');
+    const usersSnap = await getDocs(usersCol);
+    usersSnap.forEach((userDoc) => {
+      const u = userDoc.data();
+      const docId = userDoc.id;
+      if (
+        (options.winnerUid && (u.playerUid === options.winnerUid || u.uid === options.winnerUid || docId === options.winnerUid)) ||
+        (options.winnerIgn && u.playerIgn && u.playerIgn.trim().toLowerCase() === options.winnerIgn.trim().toLowerCase())
+      ) {
+        targetUserId = docId;
+      }
+    });
+  } catch (err) {
+    console.error('Error scanning users in Firestore:', err);
+  }
+
+  if (targetUserId) {
+    try {
+      const userRef = doc(db, 'users', targetUserId);
+      await updateDoc(userRef, {
+        walletBalance: increment(options.amountPkr),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const txDocRef = doc(collection(db, 'users', targetUserId, 'transactions'));
+      await setDoc(txDocRef, {
+        id: txDocRef.id,
+        userId: targetUserId,
+        type: 'prize_won',
+        amount: options.amountPkr,
+        description: options.tournamentTitle
+          ? `Prize Won: ${options.tournamentTitle}`
+          : `Tournament Winner Prize (${options.winnerIgn})`,
+        timestamp: 'Just now',
+        status: 'completed',
+      });
+    } catch (err) {
+      console.error('Error crediting winner wallet in Firestore:', err);
+    }
+  }
+
+  // Update proof if proofId is provided
+  if (options.proofId) {
+    try {
+      const proofRef = doc(db, 'match_proofs', options.proofId);
+      await updateDoc(proofRef, {
+        status: 'approved',
+        awardedPrize: options.amountPkr,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('Error updating proof status:', err);
+    }
+  }
+
+  // Update tournament if tournamentId is provided
+  if (options.tournamentId) {
+    try {
+      const tournRef = doc(db, 'tournaments', options.tournamentId);
+      await updateDoc(tournRef, {
+        winnerBooyahIgn: options.winnerIgn,
+        status: 'completed',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('Error completing tournament:', err);
+    }
+  }
+
+  return {
+    success: true,
+    creditedUser: targetUserId,
+    message: targetUserId
+      ? `Rs. ${options.amountPkr} PKR successfully transferred to ${options.winnerIgn}'s wallet!`
+      : `Prize of Rs. ${options.amountPkr} PKR marked distributed for ${options.winnerIgn}!`,
+  };
+}
+
+// ==========================================
+// 9. Batch Deletion Helpers
+// ==========================================
+
+export async function batchDeleteTournaments(tournamentIds: string[]) {
+  await Promise.all(tournamentIds.map((id) => deleteDoc(doc(db, 'tournaments', id))));
+}
+
+export async function batchDeleteDeposits(depositIds: string[]) {
+  await Promise.all(depositIds.map((id) => deleteDoc(doc(db, 'deposit_requests', id))));
+}
+
+export async function batchDeleteWithdrawals(withdrawalIds: string[]) {
+  await Promise.all(withdrawalIds.map((id) => deleteDoc(doc(db, 'withdrawal_requests', id))));
+}
+
+export async function batchDeleteProofs(proofIds: string[]) {
+  await Promise.all(proofIds.map((id) => deleteDoc(doc(db, 'match_proofs', id))));
+}
+
 

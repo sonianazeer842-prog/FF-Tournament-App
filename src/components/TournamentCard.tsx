@@ -48,10 +48,10 @@ export const TournamentCard: React.FC<TournamentCardProps> = ({
       {/* Top Banner Image with Overlay */}
       <div className="relative h-36 w-full overflow-hidden bg-neutral-950">
         <img
-          src={mapBermuda}
-          alt={tournament.map}
+          src={tournament.imageUrl || mapBermuda}
+          alt={tournament.title || tournament.map}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-60"
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-70"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/40 to-transparent" />
 

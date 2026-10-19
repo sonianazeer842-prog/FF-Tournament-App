@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Lock,
   Unlock,
@@ -18,6 +18,24 @@ import {
   CreditCard,
   Settings,
   Users,
+  Trash2,
+  Edit,
+  CopyPlus,
+  Search,
+  Filter,
+  CheckSquare,
+  Square,
+  Calendar,
+  Image as ImageIcon,
+  DollarSign,
+  UserX,
+  UserCheck,
+  Flame,
+  ArrowRight,
+  ExternalLink,
+  RefreshCw,
+  X,
+  Award,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -28,8 +46,39 @@ import {
   WithdrawalRequest,
   AdminPaymentSettings,
   MatchProofSubmission,
+  UserProfile,
 } from '../types/tournament';
 import { sounds } from '../utils/audio';
+import mapBermuda from '../assets/images/ff_map_bermuda_1792304114277.jpg';
+import trophyImg from '../assets/images/ff_esports_trophy_1792304112984.jpg';
+import heroImg from '../assets/images/ff_tournament_hero_1792304112893.jpg';
+import {
+  updateTournamentInDb,
+  deleteTournamentInDb,
+  duplicateTournamentInDb,
+  createTournamentInDb,
+  approveDepositInDb,
+  rejectDepositInDb,
+  deleteDepositInDb,
+  updateDepositAmountInDb,
+  approveWithdrawalInDb,
+  completeWithdrawalInDb,
+  rejectWithdrawalInDb,
+  deleteWithdrawalInDb,
+  updateRoomCredentialsInDb,
+  declareWinnerInDb,
+  saveAdminSettingsInDb,
+  deleteMatchProofInDb,
+  updateMatchProofInDb,
+  submitMatchProofInDb,
+  distributePrizeToWinnerInDb,
+  batchDeleteTournaments,
+  batchDeleteDeposits,
+  batchDeleteWithdrawals,
+  batchDeleteProofs,
+  subscribeAllUsers,
+  toggleBlockUserInDb,
+} from '../lib/tournamentService';
 
 interface AdminPortalProps {
   tournaments: Tournament[];
@@ -83,10 +132,60 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   });
   const [lockoutRemaining, setLockoutRemaining] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'deposits' | 'withdrawals' | 'tournaments' | 'rooms' | 'results' | 'settings'>('deposits');
+  const [activeTab, setActiveTab] = useState<
+    'tournaments' | 'deposits' | 'withdrawals' | 'rooms' | 'results' | 'settings' | 'users'
+  >('tournaments');
   const [successToast, setSuccessToast] = useState('');
 
-  // Tournament creation form state
+  // All registered users in Firestore
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+
+  // Search queries per tab
+  const [tournSearch, setTournSearch] = useState('');
+  const [depSearch, setDepSearch] = useState('');
+  const [wdrSearch, setWdrSearch] = useState('');
+  const [proofSearch, setProofSearch] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+
+  // Batch selection states
+  const [selectedTournIds, setSelectedTournIds] = useState<string[]>([]);
+  const [selectedDepIds, setSelectedDepIds] = useState<string[]>([]);
+  const [selectedWdrIds, setSelectedWdrIds] = useState<string[]>([]);
+  const [selectedProofIds, setSelectedProofIds] = useState<string[]>([]);
+
+  // Deletion Confirmation Modal State ("Kya delete karna hai?")
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    onConfirm: async () => {},
+  });
+
+  // Edit Tournament Modal State
+  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
+
+  // Edit Deposit Amount Modal State
+  const [editingDeposit, setEditingDeposit] = useState<DepositRequest | null>(null);
+  const [editDepAmountInput, setEditDepAmountInput] = useState<number>(0);
+
+  // Edit Match Result / Proof Modal State
+  const [editingProof, setEditingProof] = useState<MatchProofSubmission | null>(null);
+
+  // Upload Result / Manual Booyah Modal State
+  const [uploadResultOpen, setUploadResultOpen] = useState(false);
+  const [resTournId, setResTournId] = useState(tournaments[0]?.id || '');
+  const [resWinnerTeam, setResWinnerTeam] = useState('');
+  const [resWinnerIgn, setResWinnerIgn] = useState('');
+  const [resWinnerUid, setResWinnerUid] = useState('');
+  const [resPrizeAmount, setResPrizeAmount] = useState<number>(2500);
+
+  // Create Tournament form state
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<MatchMode>('Squad');
   const [map, setMap] = useState<MatchMap>('Bermuda');
@@ -94,44 +193,50 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [prizePool, setPrizePool] = useState(2500);
   const [perKill, setPerKill] = useState(25);
   const [startTimeMinutes, setStartTimeMinutes] = useState(45);
+  const [imageUrlInput, setImageUrlInput] = useState('');
   const [gunAttributes, setGunAttributes] = useState(false);
   const [limitedAmmo, setLimitedAmmo] = useState(true);
   const [characterSkills, setCharacterSkills] = useState(true);
   const [emulatorAllowed, setEmulatorAllowed] = useState(false);
+  const [customNote, setCustomNote] = useState('Official FFWS Pakistan rules. Mobile only. Emulators blocked.');
 
   // Room broadcast form
   const [selectedTournForRoom, setSelectedTournForRoom] = useState(tournaments[0]?.id || '');
   const [broadcastRoomId, setBroadcastRoomId] = useState('');
   const [broadcastPass, setBroadcastPass] = useState('');
 
-  // Result declaration form
-  const [selectedTournForResult, setSelectedTournForResult] = useState(tournaments[0]?.id || '');
-  const [winnerTeamInput, setWinnerTeamInput] = useState('');
-  const [winnerIgnInput, setWinnerIgnInput] = useState('');
-
   // Settings edit form
-  const [epNumber, setEpNumber] = useState(adminSettings.easypaisaNumber);
+  const [epNumber, setEpNumber] = useState(adminSettings.easypaisaNumber || '03182655142');
   const [epTitle, setEpTitle] = useState(adminSettings.easypaisaTitle || 'Saad Kazi (Qazi Battle Official)');
-  const [jcNumber, setJcNumber] = useState(adminSettings.jazzcashNumber);
+  const [jcNumber, setJcNumber] = useState(adminSettings.jazzcashNumber || '03182655142');
   const [jcTitle, setJcTitle] = useState(adminSettings.jazzcashTitle || 'Saad Kazi');
-  const [adminPin, setAdminPin] = useState(adminSettings.adminPin);
-  const [supportWhatsapp, setSupportWhatsapp] = useState(adminSettings.supportWhatsapp || '+92 345 9876543');
+  const [adminPin, setAdminPin] = useState(adminSettings.adminPin || '7860');
+  const [supportWhatsapp, setSupportWhatsapp] = useState(adminSettings.supportWhatsapp || '+92 318 2655142');
   const [merchantApiEnabled, setMerchantApiEnabled] = useState(adminSettings.merchantApiEnabled || false);
   const [merchantApiKey, setMerchantApiKey] = useState(adminSettings.merchantApiKey || '');
   const [merchantStoreId, setMerchantStoreId] = useState(adminSettings.merchantStoreId || '');
 
-  React.useEffect(() => {
-    setEpNumber(adminSettings.easypaisaNumber);
+  // Keep settings form in sync when props update
+  useEffect(() => {
+    setEpNumber(adminSettings.easypaisaNumber || '03182655142');
     setEpTitle(adminSettings.easypaisaTitle || 'Saad Kazi (Qazi Battle Official)');
-    setJcNumber(adminSettings.jazzcashNumber);
+    setJcNumber(adminSettings.jazzcashNumber || '03182655142');
     setJcTitle(adminSettings.jazzcashTitle || 'Saad Kazi');
-    setAdminPin(adminSettings.adminPin);
-    setSupportWhatsapp(adminSettings.supportWhatsapp || '+92 345 9876543');
+    setAdminPin(adminSettings.adminPin || '7860');
+    setSupportWhatsapp(adminSettings.supportWhatsapp || '+92 318 2655142');
     setMerchantApiEnabled(adminSettings.merchantApiEnabled || false);
   }, [adminSettings]);
 
+  // Subscribe to all users in Firestore
+  useEffect(() => {
+    const unsubUsers = subscribeAllUsers((users) => {
+      setAllUsers(users);
+    });
+    return () => unsubUsers();
+  }, []);
+
   // Lockout timer check on mount & interval
-  React.useEffect(() => {
+  useEffect(() => {
     const checkLockout = () => {
       try {
         const lockoutUntilStr = localStorage.getItem('qb_admin_lockout_until');
@@ -147,9 +252,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             setFailedAttempts(0);
           }
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
 
     checkLockout();
@@ -188,7 +291,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       } catch {}
 
       if (newAttempts >= 3) {
-        // Trigger 10-minute lockout (10 * 60 * 1000 = 600,000 ms)
         const lockUntil = Date.now() + 10 * 60 * 1000;
         try {
           localStorage.setItem('qb_admin_lockout_until', String(lockUntil));
@@ -210,7 +312,73 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  // ==========================================
+  // 1. TOURNAMENT ACTIONS (Edit, Delete, Duplicate, Create)
+  // ==========================================
+
+  const handleOpenEditTournament = (t: Tournament) => {
+    sounds.playClick();
+    setEditingTournament({ ...t });
+  };
+
+  const handleSaveEditedTournament = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTournament) return;
+    try {
+      await updateTournamentInDb(editingTournament.id, {
+        title: editingTournament.title,
+        mode: editingTournament.mode,
+        map: editingTournament.map,
+        entryFee: Number(editingTournament.entryFee),
+        prizePool: Number(editingTournament.prizePool),
+        maxSlots: Number(editingTournament.maxSlots),
+        startTime: editingTournament.startTime,
+        imageUrl: editingTournament.imageUrl || '',
+        rules: editingTournament.rules,
+        prizeBreakdown: {
+          first: Math.round(Number(editingTournament.prizePool) * 0.5),
+          second: Math.round(Number(editingTournament.prizePool) * 0.25),
+          third: Math.round(Number(editingTournament.prizePool) * 0.15),
+          fourthToTenth: Math.round(Number(editingTournament.prizePool) * 0.02),
+          perKill: editingTournament.prizeBreakdown?.perKill || 25,
+        },
+      });
+      sounds.playVictory();
+      showToast(`Tournament "${editingTournament.title}" updated in Firestore!`);
+      setEditingTournament(null);
+    } catch (err) {
+      console.error('Error saving tournament:', err);
+      showToast('Error saving changes to Firestore.');
+    }
+  };
+
+  const handleDeleteTournamentClick = (t: Tournament) => {
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Delete Tournament)',
+      description: `Kya aap waqai "${t.title}" ko delete karna chahte hain? Ye match Firestore aur Player App se foran remove ho jayega.`,
+      onConfirm: async () => {
+        await deleteTournamentInDb(t, 'deleted');
+        sounds.playClick();
+        showToast(`Tournament "${t.title}" deleted from Firestore!`);
+        setSelectedTournIds((prev) => prev.filter((id) => id !== t.id));
+      },
+    });
+  };
+
+  const handleDuplicateTournamentClick = async (t: Tournament) => {
+    sounds.playVictory();
+    try {
+      const copy = await duplicateTournamentInDb(t);
+      showToast(`Tournament duplicated successfully! "${copy.title}"`);
+    } catch (err) {
+      console.error('Error duplicating tournament:', err);
+      showToast('Error duplicating tournament.');
+    }
+  };
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
@@ -232,53 +400,243 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       maxSlots: mode === 'Solo' ? 48 : mode === 'Duo' ? 24 : mode === 'Clash Squad' ? 8 : 12,
       registeredCount: 0,
       slots: [],
+      players: [],
       startTime: new Date(Date.now() + 1000 * 60 * startTimeMinutes).toISOString(),
       status: 'upcoming',
       roomId: `FF-${Math.floor(100000 + Math.random() * 900000)}`,
       roomPassword: `QAZI_${Math.floor(1000 + Math.random() * 9000)}`,
       roomRevealed: false,
       version: emulatorAllowed ? 'All Devices' : 'Mobile Only',
+      imageUrl: imageUrlInput.trim() || undefined,
       rules: {
         gunAttributes,
         characterSkills,
         limitedAmmo,
         emulatorAllowed,
-        customNote: 'Official FFWS Pakistan rules. Mobile only. Emulators blocked.',
+        customNote,
       },
     };
 
     sounds.playJoin();
+    await createTournamentInDb(newTournament);
     onCreateTournament(newTournament);
-    showToast(language === 'ur' ? `Tournament "${newTournament.title}" shamil ho gaya!` : `Tournament "${newTournament.title}" created!`);
+    showToast(language === 'ur' ? `Tournament "${newTournament.title}" Firestore me shamil ho gaya!` : `Tournament "${newTournament.title}" created in Firestore!`);
     setTitle('');
+    setImageUrlInput('');
+    setShowCreateForm(false);
   };
 
-  const handleBroadcastSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTournForRoom || !broadcastRoomId.trim() || !broadcastPass.trim()) return;
+  // ==========================================
+  // 2. DEPOSIT ACTIONS (Approve, Reject, Delete, Edit Amount)
+  // ==========================================
 
-    onUpdateRoomCredentials(selectedTournForRoom, broadcastRoomId.trim(), broadcastPass.trim(), true);
-    sounds.playVictory();
-    showToast(language === 'ur' ? 'Room ID & Password registered players ko bhej di gayi!' : 'Room credentials successfully broadcasted!');
-  };
-
-  const handleWinnerSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTournForResult || !winnerTeamInput.trim()) return;
-
-    onDeclareWinner(selectedTournForResult, winnerTeamInput.trim(), winnerIgnInput.trim());
+  const handleApproveDepositClick = async (dep: DepositRequest) => {
     try {
-      confetti({ particleCount: 60, spread: 70, origin: { y: 0.5 } });
-    } catch {}
-    sounds.playVictory();
-    showToast(language === 'ur' ? `Champion "${winnerTeamInput}" declare ho gaya!` : `Champion "${winnerTeamInput}" declared!`);
-    setWinnerTeamInput('');
-    setWinnerIgnInput('');
+      sounds.playVictory();
+      await approveDepositInDb(dep);
+      onApproveDeposit(dep.id);
+      showToast(`Rs. ${dep.amountPkr} PKR successfully credited to ${dep.playerIgn}'s wallet!`);
+    } catch (err) {
+      console.error('Error approving deposit:', err);
+      showToast('Failed to approve deposit.');
+    }
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleRejectDepositClick = async (dep: DepositRequest) => {
+    try {
+      sounds.playClick();
+      await rejectDepositInDb(dep.id);
+      onRejectDeposit(dep.id);
+      showToast(`Deposit request of Rs. ${dep.amountPkr} from ${dep.playerIgn} rejected.`);
+    } catch (err) {
+      console.error('Error rejecting deposit:', err);
+    }
+  };
+
+  const handleDeleteDepositClick = (dep: DepositRequest) => {
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Delete Deposit Request)',
+      description: `Delete deposit request of Rs. ${dep.amountPkr} PKR for ${dep.playerIgn} (TID: ${dep.trxId})?`,
+      onConfirm: async () => {
+        await deleteDepositInDb(dep.id);
+        sounds.playClick();
+        showToast('Deposit request permanently deleted from Firestore.');
+        setSelectedDepIds((prev) => prev.filter((id) => id !== dep.id));
+      },
+    });
+  };
+
+  const handleSaveEditDepositAmount = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateSettings({
+    if (!editingDeposit) return;
+    try {
+      await updateDepositAmountInDb(editingDeposit.id, Number(editDepAmountInput));
+      sounds.playVictory();
+      showToast(`Deposit amount updated to Rs. ${editDepAmountInput} PKR in Firestore!`);
+      setEditingDeposit(null);
+    } catch (err) {
+      console.error('Error updating deposit amount:', err);
+      showToast('Failed to update deposit amount.');
+    }
+  };
+
+  // ==========================================
+  // 3. WITHDRAWAL ACTIONS (Approve, Mark as Paid, Reject, Delete)
+  // ==========================================
+
+  const handleApproveWithdrawalClick = async (wdr: WithdrawalRequest) => {
+    try {
+      sounds.playVictory();
+      await approveWithdrawalInDb(wdr.id);
+      showToast(`Withdrawal of Rs. ${wdr.amountPkr} for ${wdr.playerIgn} marked as Approved!`);
+    } catch (err) {
+      console.error('Error approving withdrawal:', err);
+    }
+  };
+
+  const handleMarkPaidWithdrawalClick = async (wdr: WithdrawalRequest) => {
+    const refId = `EP-${Math.floor(10000000 + Math.random() * 90000000)}`;
+    try {
+      sounds.playVictory();
+      await completeWithdrawalInDb(wdr.id, refId);
+      onCompleteWithdrawal(wdr.id, refId);
+      showToast(`Withdrawal of Rs. ${wdr.amountPkr} to ${wdr.accountNumber} marked as Paid (Ref: ${refId})!`);
+    } catch (err) {
+      console.error('Error completing withdrawal:', err);
+    }
+  };
+
+  const handleRejectWithdrawalClick = async (wdr: WithdrawalRequest) => {
+    try {
+      sounds.playClick();
+      await rejectWithdrawalInDb(wdr);
+      onRejectWithdrawal(wdr.id);
+      showToast(`Withdrawal rejected and Rs. ${wdr.amountPkr} refunded to player wallet.`);
+    } catch (err) {
+      console.error('Error rejecting withdrawal:', err);
+    }
+  };
+
+  const handleDeleteWithdrawalClick = (wdr: WithdrawalRequest) => {
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Delete Withdrawal Request)',
+      description: `Delete withdrawal request of Rs. ${wdr.amountPkr} PKR for ${wdr.playerIgn}?`,
+      onConfirm: async () => {
+        await deleteWithdrawalInDb(wdr.id);
+        sounds.playClick();
+        showToast('Withdrawal record deleted from Firestore.');
+        setSelectedWdrIds((prev) => prev.filter((id) => id !== wdr.id));
+      },
+    });
+  };
+
+  // ==========================================
+  // 4. RESULTS & PROOFS ACTIONS (Upload, Edit, Delete, Distribute Prize)
+  // ==========================================
+
+  const handleDistributePrizeClick = async (proof: MatchProofSubmission) => {
+    const prize = proof.awardedPrize || 1500;
+    try {
+      const res = await distributePrizeToWinnerInDb({
+        winnerIgn: proof.playerIgn,
+        winnerUid: proof.playerUid,
+        userId: proof.userId,
+        amountPkr: prize,
+        tournamentTitle: proof.tournamentTitle,
+        tournamentId: proof.tournamentId,
+        proofId: proof.id,
+      });
+      sounds.playVictory();
+      try {
+        confetti({ particleCount: 80, spread: 80, origin: { y: 0.5 } });
+      } catch {}
+      showToast(res.message);
+    } catch (err) {
+      console.error('Error distributing prize:', err);
+      showToast('Error distributing prize to wallet.');
+    }
+  };
+
+  const handleDeleteProofClick = (proof: MatchProofSubmission) => {
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Delete Match Result / Proof)',
+      description: `Delete match proof from ${proof.playerIgn} for "${proof.tournamentTitle}"?`,
+      onConfirm: async () => {
+        await deleteMatchProofInDb(proof.id);
+        sounds.playClick();
+        showToast('Match result deleted from Firestore.');
+        setSelectedProofIds((prev) => prev.filter((id) => id !== proof.id));
+      },
+    });
+  };
+
+  const handleSaveEditProof = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProof) return;
+    try {
+      await updateMatchProofInDb(editingProof.id, {
+        claimedRank: Number(editingProof.claimedRank),
+        claimedKills: Number(editingProof.claimedKills),
+        awardedPrize: Number(editingProof.awardedPrize),
+        status: editingProof.status,
+      });
+      sounds.playVictory();
+      showToast('Match result updated in Firestore!');
+      setEditingProof(null);
+    } catch (err) {
+      console.error('Error updating proof:', err);
+      showToast('Failed to update result.');
+    }
+  };
+
+  const handleUploadResultSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resWinnerIgn.trim()) return;
+
+    const selectedTourn = tournaments.find((t) => t.id === resTournId);
+    const newProof: MatchProofSubmission = {
+      id: `prf-admin-${Date.now()}`,
+      tournamentId: resTournId || 'custom-match',
+      tournamentTitle: selectedTourn?.title || 'Qazi Battle Championship Match',
+      playerIgn: resWinnerIgn.trim(),
+      playerUid: resWinnerUid.trim() || 'FF-' + Math.floor(10000000 + Math.random() * 90000000),
+      claimedRank: 1,
+      claimedKills: 8,
+      submissionTime: 'Just now (Admin Declared)',
+      status: 'approved',
+      awardedPrize: resPrizeAmount,
+    };
+
+    try {
+      await submitMatchProofInDb(newProof);
+      if (resTournId) {
+        await declareWinnerInDb(resTournId, resWinnerTeam.trim() || 'Winner Squad', resWinnerIgn.trim());
+      }
+      sounds.playVictory();
+      showToast(`Match result published & Booyah Champion "${resWinnerIgn}" declared!`);
+      setUploadResultOpen(false);
+      setResWinnerIgn('');
+      setResWinnerTeam('');
+      setResWinnerUid('');
+    } catch (err) {
+      console.error('Error publishing result:', err);
+      showToast('Error declaring winner.');
+    }
+  };
+
+  // ==========================================
+  // 5. SAAD KAZI PAYMENT SETTINGS SAVE
+  // ==========================================
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const updatedSettings: AdminPaymentSettings = {
       easypaisaNumber: epNumber.trim(),
       easypaisaTitle: epTitle.trim(),
       jazzcashNumber: jcNumber.trim(),
@@ -288,33 +646,190 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       merchantApiEnabled,
       merchantApiKey: merchantApiKey.trim(),
       merchantStoreId: merchantStoreId.trim(),
-    });
-    sounds.playVictory();
-    showToast(language === 'ur' ? 'Saad Kazi ke EasyPaisa aur JazzCash accounts save ho gaye!' : 'Saad Kazi payment accounts saved successfully!');
+    };
+
+    try {
+      await saveAdminSettingsInDb(updatedSettings);
+      onUpdateSettings(updatedSettings);
+      sounds.playVictory();
+      showToast('Saad Kazi EasyPaisa & JazzCash numbers saved in Firestore!');
+    } catch (err) {
+      console.error('Error saving settings in DB:', err);
+      showToast('Error saving payment settings.');
+    }
   };
 
-  // If locked, show security gate
+  // ==========================================
+  // 6. BATCH DELETION ACTIONS
+  // ==========================================
+
+  const handleBatchDeleteTournaments = () => {
+    if (selectedTournIds.length === 0) return;
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Batch Delete Tournaments)',
+      description: `Kya aap waqai ${selectedTournIds.length} select kiye gaye tournaments ko delete karna chahte hain? Ye Firestore se foran delete ho jayenge.`,
+      onConfirm: async () => {
+        await batchDeleteTournaments(selectedTournIds);
+        sounds.playClick();
+        showToast(`${selectedTournIds.length} tournaments deleted from Firestore!`);
+        setSelectedTournIds([]);
+      },
+    });
+  };
+
+  const handleBatchDeleteDeposits = () => {
+    if (selectedDepIds.length === 0) return;
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Batch Delete Deposits)',
+      description: `Delete ${selectedDepIds.length} selected deposit requests from Firestore?`,
+      onConfirm: async () => {
+        await batchDeleteDeposits(selectedDepIds);
+        sounds.playClick();
+        showToast(`${selectedDepIds.length} deposit requests deleted from Firestore!`);
+        setSelectedDepIds([]);
+      },
+    });
+  };
+
+  const handleBatchDeleteWithdrawals = () => {
+    if (selectedWdrIds.length === 0) return;
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Batch Delete Withdrawals)',
+      description: `Delete ${selectedWdrIds.length} selected withdrawal records from Firestore?`,
+      onConfirm: async () => {
+        await batchDeleteWithdrawals(selectedWdrIds);
+        sounds.playClick();
+        showToast(`${selectedWdrIds.length} withdrawal records deleted from Firestore!`);
+        setSelectedWdrIds([]);
+      },
+    });
+  };
+
+  const handleBatchDeleteProofs = () => {
+    if (selectedProofIds.length === 0) return;
+    sounds.playClick();
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Kya delete karna hai? (Batch Delete Match Results)',
+      description: `Delete ${selectedProofIds.length} selected match results/proofs from Firestore?`,
+      onConfirm: async () => {
+        await batchDeleteProofs(selectedProofIds);
+        sounds.playClick();
+        showToast(`${selectedProofIds.length} match proofs deleted from Firestore!`);
+        setSelectedProofIds([]);
+      },
+    });
+  };
+
+  // ==========================================
+  // 7. USER MANAGEMENT (BLOCK / UNBLOCK)
+  // ==========================================
+
+  const handleToggleBlockUser = async (u: UserProfile) => {
+    const newStatus = !u.isBlocked;
+    try {
+      await toggleBlockUserInDb(u.id, newStatus);
+      sounds.playClick();
+      showToast(newStatus ? `Player ${u.displayName} blocked.` : `Player ${u.displayName} unblocked.`);
+    } catch (err) {
+      console.error('Error updating user block status:', err);
+    }
+  };
+
+  // Filtered lists for Admin views
+  const filteredTournaments = useMemo(() => {
+    return tournaments.filter((t) => {
+      const q = tournSearch.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        t.title.toLowerCase().includes(q) ||
+        t.map.toLowerCase().includes(q) ||
+        t.mode.toLowerCase().includes(q) ||
+        (t.roomId && t.roomId.toLowerCase().includes(q))
+      );
+    });
+  }, [tournaments, tournSearch]);
+
+  const filteredDeposits = useMemo(() => {
+    return depositRequests.filter((d) => {
+      const q = depSearch.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        d.playerIgn.toLowerCase().includes(q) ||
+        d.playerUid.toLowerCase().includes(q) ||
+        d.trxId.toLowerCase().includes(q) ||
+        d.senderNumber.toLowerCase().includes(q) ||
+        d.method.toLowerCase().includes(q)
+      );
+    });
+  }, [depositRequests, depSearch]);
+
+  const filteredWithdrawals = useMemo(() => {
+    return withdrawalRequests.filter((w) => {
+      const q = wdrSearch.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        w.playerIgn.toLowerCase().includes(q) ||
+        w.playerUid.toLowerCase().includes(q) ||
+        w.accountNumber.toLowerCase().includes(q) ||
+        w.accountTitle.toLowerCase().includes(q) ||
+        w.method.toLowerCase().includes(q)
+      );
+    });
+  }, [withdrawalRequests, wdrSearch]);
+
+  const filteredProofs = useMemo(() => {
+    return pendingProofs.filter((p) => {
+      const q = proofSearch.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        p.playerIgn.toLowerCase().includes(q) ||
+        p.playerUid.toLowerCase().includes(q) ||
+        p.tournamentTitle.toLowerCase().includes(q) ||
+        p.status.toLowerCase().includes(q)
+      );
+    });
+  }, [pendingProofs, proofSearch]);
+
+  const filteredUsers = useMemo(() => {
+    return allUsers.filter((u) => {
+      const q = userSearch.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        (u.displayName && u.displayName.toLowerCase().includes(q)) ||
+        (u.ffUid && u.ffUid.toLowerCase().includes(q)) ||
+        (u.email && u.email.toLowerCase().includes(q)) ||
+        (u.phone && u.phone.toLowerCase().includes(q))
+      );
+    });
+  }, [allUsers, userSearch]);
+
+  // Security gate if not unlocked
   if (!isUnlocked) {
     return (
       <div className="max-w-md mx-auto my-12 bg-neutral-900 border border-neutral-800 rounded-2xl p-6 sm:p-8 text-center space-y-4 shadow-2xl">
-        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto ${
-          lockoutRemaining > 0
-            ? 'bg-red-500/10 border border-red-500/30 text-red-400'
-            : 'bg-amber-500/10 border border-amber-500/20 text-amber-500'
-        }`}>
+        <div
+          className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto ${
+            lockoutRemaining > 0
+              ? 'bg-red-500/10 border border-red-500/30 text-red-400'
+              : 'bg-amber-500/10 border border-amber-500/20 text-amber-500'
+          }`}
+        >
           <Lock className="w-7 h-7" />
         </div>
 
         <div>
-          <h2 className="text-xl font-display font-bold text-white">Qazi Battle Secret Admin Console</h2>
+          <h2 className="text-xl font-display font-bold text-white">Qazi Battle Master Admin Panel</h2>
           <p className="text-xs text-neutral-400 mt-1">
             {lockoutRemaining > 0
-              ? language === 'ur'
-                ? `Security Lockout Active: Too many failed attempts. Try again in ${Math.floor(lockoutRemaining / 60)}m ${lockoutRemaining % 60}s.`
-                : `Security Lockout Active: Too many failed attempts. Try again in ${Math.floor(lockoutRemaining / 60)}m ${lockoutRemaining % 60}s.`
-              : language === 'ur'
-              ? 'Makhsoos Admin Console. Apna 4-digit PIN enter karein.'
-              : 'Restricted Admin Console. Enter 4-digit security PIN.'}
+              ? `Security Lockout Active. Try again in ${Math.floor(lockoutRemaining / 60)}m ${lockoutRemaining % 60}s.`
+              : 'Saad Kazi Official Esports Control Panel. Enter security PIN to unlock.'}
           </p>
         </div>
 
@@ -323,7 +838,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <div className="font-mono text-2xl font-black text-red-400">
               {String(Math.floor(lockoutRemaining / 60)).padStart(2, '0')}:{String(lockoutRemaining % 60).padStart(2, '0')}
             </div>
-            <p>10-Minute Security Lockout Active. System has recorded unauthorized attempts.</p>
+            <p>10-Minute Security Lockout Active.</p>
           </div>
         ) : (
           <>
@@ -340,7 +855,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 maxLength={6}
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
-                placeholder="Enter Admin PIN"
+                placeholder="Enter Admin PIN (7860)"
                 className="w-full text-center tracking-widest text-lg font-mono py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-500"
               />
 
@@ -349,7 +864,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 className="w-full py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-amber-500 hover:bg-amber-400 text-neutral-950 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
               >
                 <Unlock className="w-4 h-4 stroke-[2.5]" />
-                <span>{language === 'ur' ? 'Admin Panel Unlock Karein' : 'Unlock Admin Portal'}</span>
+                <span>Unlock Master Admin Panel</span>
               </button>
             </form>
           </>
@@ -361,7 +876,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               sounds.playClick();
               onExitAdmin();
             }}
-            className="text-xs text-neutral-400 hover:text-white transition-colors"
+            className="text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer"
           >
             ← Return to Player App
           </button>
@@ -376,19 +891,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Admin Banner */}
-      <div className="bg-gradient-to-r from-neutral-900 via-neutral-900 to-neutral-950 border border-neutral-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-neutral-900 via-neutral-900 to-neutral-950 border border-neutral-800 rounded-2xl p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">
             <ShieldCheck className="w-4 h-4" />
-            <span>Pakistan Esports Admin Authority</span>
+            <span>Full Admin Control Center</span>
             <span className="text-neutral-600">·</span>
-            <span className="text-neutral-400">EasyPaisa & JazzCash Gateway</span>
+            <span className="text-neutral-400">Firestore Powered</span>
           </div>
-          <h2 className="text-2xl font-display font-black text-white">Qazi Battle Master Admin Panel</h2>
+          <h2 className="text-2xl font-display font-black text-white flex items-center gap-2">
+            <span>Qazi Battle Master Admin Panel</span>
+            <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              Saad Kazi
+            </span>
+          </h2>
           <p className="text-xs text-neutral-400 mt-1">
-            {language === 'ur'
-              ? 'EasyPaisa/JazzCash ke deposits verify karein, players ke withdrawals bhejein, aur Free Fire room control karein.'
-              : 'Verify EasyPaisa & JazzCash TID receipts, disburse player cashouts, and manage custom room broadcasts.'}
+            Complete management for tournaments, EasyPaisa/JazzCash deposits, player cashouts, match results, and receiving numbers.
           </p>
         </div>
 
@@ -399,7 +917,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               setIsUnlocked(false);
               onExitAdmin();
             }}
-            className="px-3.5 py-1.5 rounded-lg bg-neutral-950 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            className="px-3.5 py-1.5 rounded-lg bg-neutral-950 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <span>← Exit to Player App</span>
           </button>
@@ -408,7 +926,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               sounds.playClick();
               setIsUnlocked(false);
             }}
-            className="px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/60 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            className="px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/60 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Lock className="w-3.5 h-3.5" />
             <span>Lock</span>
@@ -417,50 +935,84 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       </div>
 
       {successToast && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-800 text-emerald-300 text-xs flex items-center gap-2">
+        <div className="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-700 text-emerald-200 text-xs flex items-center gap-2 shadow-lg animate-in fade-in">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{successToast}</span>
+          <span className="font-medium">{successToast}</span>
         </div>
       )}
 
       {/* KPI Overview Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl">
+        <div
+          onClick={() => setActiveTab('deposits')}
+          className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl cursor-pointer hover:border-amber-500/40 transition-colors"
+        >
           <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Pending Deposits</span>
-          <div className="text-xl font-bold font-mono text-amber-400 tabular-nums mt-1">{pendingDepositsCount} Requests</div>
+          <div className="text-xl font-bold font-mono text-amber-400 tabular-nums mt-1">
+            {pendingDepositsCount} Requests
+          </div>
           <span className="text-[11px] text-neutral-400">EasyPaisa & JazzCash</span>
         </div>
 
-        <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl">
+        <div
+          onClick={() => setActiveTab('withdrawals')}
+          className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl cursor-pointer hover:border-amber-500/40 transition-colors"
+        >
           <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Pending Cashouts</span>
-          <div className="text-xl font-bold font-mono text-orange-400 tabular-nums mt-1">{pendingWithdrawalsCount} Requests</div>
+          <div className="text-xl font-bold font-mono text-orange-400 tabular-nums mt-1">
+            {pendingWithdrawalsCount} Requests
+          </div>
           <span className="text-[11px] text-neutral-400">Player Withdrawals</span>
         </div>
 
-        <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl">
+        <div
+          onClick={() => setActiveTab('tournaments')}
+          className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl cursor-pointer hover:border-amber-500/40 transition-colors"
+        >
           <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Active Tournaments</span>
-          <div className="text-xl font-bold font-mono text-neutral-200 tabular-nums mt-1">{tournaments.length} Matches</div>
+          <div className="text-xl font-bold font-mono text-neutral-200 tabular-nums mt-1">
+            {tournaments.length} Matches
+          </div>
           <span className="text-[11px] text-neutral-400">Bermuda / Kalahari / Alpine</span>
         </div>
 
-        <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl">
-          <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Admin Receiving Till</span>
-          <div className="text-xs font-mono font-bold text-emerald-400 truncate mt-1">{adminSettings.easypaisaNumber}</div>
-          <span className="text-[11px] text-neutral-400">EasyPaisa Active</span>
+        <div
+          onClick={() => setActiveTab('settings')}
+          className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl cursor-pointer hover:border-amber-500/40 transition-colors"
+        >
+          <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Saad Kazi Receiving Till</span>
+          <div className="text-xs font-mono font-bold text-emerald-400 truncate mt-1">
+            {adminSettings.easypaisaNumber || '03182655142'}
+          </div>
+          <span className="text-[11px] text-neutral-400">EasyPaisa & JazzCash Direct</span>
         </div>
       </div>
 
-      {/* Navigation Sub-Tabs */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-neutral-950 border border-neutral-800 rounded-xl overflow-x-auto text-xs font-semibold">
+      {/* Navigation Tabs */}
+      <div className="flex items-center gap-1.5 p-1.5 bg-neutral-950 border border-neutral-800 rounded-xl overflow-x-auto text-xs font-semibold scrollbar-none">
+        <button
+          onClick={() => {
+            sounds.playClick();
+            setActiveTab('tournaments');
+          }}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+            activeTab === 'tournaments' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
+          }`}
+        >
+          <Trophy className="w-3.5 h-3.5" />
+          <span>Active Tournaments ({tournaments.length})</span>
+        </button>
+
         <button
           onClick={() => {
             sounds.playClick();
             setActiveTab('deposits');
           }}
-          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
             activeTab === 'deposits' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}
         >
+          <Smartphone className="w-3.5 h-3.5" />
           <span>EasyPaisa / JazzCash Deposits</span>
           {pendingDepositsCount > 0 && (
             <span className="px-1.5 py-0.2 rounded-full bg-red-600 text-white font-mono text-[10px]">
@@ -474,10 +1026,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             sounds.playClick();
             setActiveTab('withdrawals');
           }}
-          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
             activeTab === 'withdrawals' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}
         >
+          <Coins className="w-3.5 h-3.5" />
           <span>Player Withdrawals</span>
           {pendingWithdrawalsCount > 0 && (
             <span className="px-1.5 py-0.2 rounded-full bg-orange-600 text-white font-mono text-[10px]">
@@ -489,13 +1042,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         <button
           onClick={() => {
             sounds.playClick();
-            setActiveTab('tournaments');
+            setActiveTab('results');
           }}
-          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-            activeTab === 'tournaments' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+            activeTab === 'results' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}
         >
-          Create Tournament
+          <Award className="w-3.5 h-3.5" />
+          <span>Results & Proofs ({pendingProofs.length})</span>
         </button>
 
         <button
@@ -503,23 +1057,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             sounds.playClick();
             setActiveTab('rooms');
           }}
-          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
             activeTab === 'rooms' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}
         >
-          Room ID Broadcast
+          <Key className="w-3.5 h-3.5" />
+          <span>Room ID Broadcast</span>
         </button>
 
         <button
           onClick={() => {
             sounds.playClick();
-            setActiveTab('results');
+            setActiveTab('users');
           }}
-          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-            activeTab === 'results' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+            activeTab === 'users' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}
         >
-          Results & Proofs
+          <Users className="w-3.5 h-3.5" />
+          <span>All Users ({allUsers.length})</span>
         </button>
 
         <button
@@ -527,7 +1083,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             sounds.playClick();
             setActiveTab('settings');
           }}
-          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
             activeTab === 'settings' ? 'bg-amber-500 text-neutral-950 shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}
         >
@@ -537,307 +1093,909 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </button>
       </div>
 
-      {/* Tab 1: EasyPaisa & JazzCash Deposit Approvals */}
-      {activeTab === 'deposits' && (
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
-                <Smartphone className="w-5 h-5 text-emerald-400" />
-                <span>{language === 'ur' ? 'EasyPaisa aur JazzCash Jama Request Tasdeeq' : 'Incoming Deposit Requests (EasyPaisa / JazzCash)'}</span>
-              </h3>
-              <p className="text-xs text-neutral-400 mt-0.5">
-                {language === 'ur'
-                  ? 'Players ne aapke EasyPaisa / JazzCash par payment bhej kar TID dali hai. Verify karein aur foran unka balance approve karein.'
-                  : 'Players sent PKR to your accounts. Verify the Transaction ID (TID) and approve to credit wallet balance.'}
-              </p>
+      {/* ========================================================================= */}
+      {/* TAB 1: ACTIVE TOURNAMENTS (With [Edit] [Delete] [Duplicate] on each card) */}
+      {/* ========================================================================= */}
+      {activeTab === 'tournaments' && (
+        <div className="space-y-5">
+          {/* Action Bar with Search and Create Button */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={tournSearch}
+                  onChange={(e) => setTournSearch(e.target.value)}
+                  placeholder="Search tournaments by title, map, mode, room ID..."
+                  className="w-full pl-9 pr-4 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {selectedTournIds.length > 0 && (
+                <button
+                  onClick={handleBatchDeleteTournaments}
+                  className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Selected ({selectedTournIds.length})</span>
+                </button>
+              )}
             </div>
+
+            <button
+              onClick={() => {
+                sounds.playClick();
+                setShowCreateForm(!showCreateForm);
+              }}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer shrink-0"
+            >
+              <PlusCircle className="w-4 h-4 stroke-[2.5]" />
+              <span>{showCreateForm ? 'Close Create Form' : '+ Create New Tournament'}</span>
+            </button>
           </div>
 
-          {depositRequests.length === 0 ? (
-            <div className="text-center py-10 text-neutral-500 text-xs">No deposit requests logged.</div>
-          ) : (
-            <div className="space-y-3">
-              {depositRequests.map((dep) => (
-                <div
-                  key={dep.id}
-                  className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs"
+          {/* Collapsible Create Tournament Form */}
+          {showCreateForm && (
+            <form onSubmit={handleCreateSubmit} className="bg-neutral-900 border border-amber-500/40 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                <h3 className="text-sm font-display font-bold text-white flex items-center gap-2">
+                  <PlusCircle className="w-4 h-4 text-amber-500" />
+                  <span>Create Tournament in Firestore (collection "tournaments")</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateForm(false)}
+                  className="text-neutral-500 hover:text-white"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                          dep.method === 'EasyPaisa' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'
-                        }`}
-                      >
-                        {dep.method}
-                      </span>
-                      <span className="font-bold text-white text-sm font-mono tabular-nums">
-                        Rs. {dep.amountPkr} PKR
-                      </span>
-                      <span className="text-neutral-500">·</span>
-                      <span className="text-neutral-300 font-semibold">{dep.playerIgn}</span>
-                      <span className="text-neutral-500 font-mono">(UID: {dep.playerUid})</span>
-                    </div>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-neutral-400 text-[11px]">
-                      <span>
-                        Sender Mobile: <strong className="text-neutral-200 font-mono">{dep.senderNumber}</strong> ({dep.senderName})
-                      </span>
-                      <span>·</span>
-                      <span>
-                        TRX ID / TID: <strong className="text-amber-400 font-mono">{dep.trxId}</strong>
-                      </span>
-                      <span>·</span>
-                      <span className="text-neutral-500">{dep.submittedAt}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    {dep.status === 'pending' ? (
-                      <>
-                        <button
-                          onClick={() => {
-                            sounds.playVictory();
-                            onApproveDeposit(dep.id);
-                            showToast(`Rs. ${dep.amountPkr} PKR successfully credited to ${dep.playerIgn}!`);
-                          }}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 transition-colors"
-                        >
-                          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                          <span>Approve & Credit</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            sounds.playClick();
-                            onRejectDeposit(dep.id);
-                            showToast(`Deposit request rejected.`);
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-colors"
-                        >
-                          Reject
-                        </button>
-                      </>
-                    ) : dep.status === 'approved' ? (
-                      <span className="text-emerald-400 font-medium flex items-center gap-1">
-                        <CheckCircle className="w-3.5 h-3.5" /> Approved & Credited
-                      </span>
-                    ) : (
-                      <span className="text-neutral-500">Rejected</span>
-                    )}
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div className="md:col-span-2">
+                  <label className="block text-neutral-300 font-semibold mb-1">Tournament Title</label>
+                  <input
+                    type="text"
+                    required
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g. Qazi Battle Bermuda Squad Cup"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  />
                 </div>
-              ))}
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Map</label>
+                  <select
+                    value={map}
+                    onChange={(e) => setMap(e.target.value as MatchMap)}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="Bermuda">Bermuda</option>
+                    <option value="Purgatory">Purgatory</option>
+                    <option value="Kalahari">Kalahari</option>
+                    <option value="Alpine">Alpine</option>
+                    <option value="NexTerra">NexTerra</option>
+                    <option value="Craftland">Craftland</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Match Mode</label>
+                  <select
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value as MatchMode)}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="Squad">Squad (12 Teams / 48 Players)</option>
+                    <option value="Solo">Solo (48 Single Contenders)</option>
+                    <option value="Duo">Duo (24 Teams)</option>
+                    <option value="Clash Squad">Clash Squad 4v4</option>
+                    <option value="1v1">1v1 Custom Duel</option>
+                    <option value="2v2">2v2 Custom Match</option>
+                    <option value="3v3">3v3 Custom Match</option>
+                    <option value="4v4">4v4 Custom Match</option>
+                    <option value="Lone Wolf">Lone Wolf</option>
+                    <option value="Full Map Custom">Full Map Custom</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Entry Fee (PKR)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={10}
+                    value={entryFee}
+                    onChange={(e) => setEntryFee(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Total Prize Pool (PKR)</label>
+                  <input
+                    type="number"
+                    min={100}
+                    step={100}
+                    value={prizePool}
+                    onChange={(e) => setPrizePool(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Per Kill Reward (PKR)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={5}
+                    value={perKill}
+                    onChange={(e) => setPerKill(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Start Delay (Minutes)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={1440}
+                    step={5}
+                    value={startTimeMinutes}
+                    onChange={(e) => setStartTimeMinutes(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-neutral-300 font-semibold mb-1">Custom Banner Image URL (Optional)</label>
+                  <input
+                    type="url"
+                    value={imageUrlInput}
+                    onChange={(e) => setImageUrlInput(e.target.value)}
+                    placeholder="https://example.com/banner.jpg or leave blank for default map banner"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateForm(false)}
+                  className="px-4 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  <span>Publish to Firestore</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Select All Checkbox Header */}
+          <div className="flex items-center justify-between px-2 text-xs text-neutral-400">
+            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={selectedTournIds.length > 0 && selectedTournIds.length === filteredTournaments.length}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedTournIds(filteredTournaments.map((t) => t.id));
+                  } else {
+                    setSelectedTournIds([]);
+                  }
+                }}
+                className="rounded border-neutral-700 bg-neutral-900 text-amber-500 focus:ring-0 cursor-pointer"
+              />
+              <span>Select All Tournaments ({filteredTournaments.length})</span>
+            </label>
+            <span className="text-[11px] text-neutral-500 font-mono">
+              Showing {filteredTournaments.length} of {tournaments.length}
+            </span>
+          </div>
+
+          {/* Tournaments Grid */}
+          {filteredTournaments.length === 0 ? (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-10 text-center space-y-3">
+              <Trophy className="w-10 h-10 text-neutral-600 mx-auto" />
+              <h4 className="text-sm font-bold text-white">Koi tournament nahi mila</h4>
+              <p className="text-xs text-neutral-400">Search filter ko clear karein ya naya tournament banayein.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredTournaments.map((t) => {
+                const isSelected = selectedTournIds.includes(t.id);
+                return (
+                  <div
+                    key={t.id}
+                    className={`bg-neutral-900 border rounded-2xl overflow-hidden transition-all flex flex-col justify-between ${
+                      isSelected ? 'border-amber-500 shadow-md ring-1 ring-amber-500/50' : 'border-neutral-800 hover:border-neutral-700'
+                    }`}
+                  >
+                    {/* Top Banner */}
+                    <div className="relative h-32 w-full bg-neutral-950 overflow-hidden">
+                      <img
+                        src={t.imageUrl || mapBermuda}
+                        alt={t.title}
+                        className="w-full h-full object-cover opacity-60"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/40 to-transparent" />
+
+                      {/* Checkbox Overlay */}
+                      <div className="absolute top-3 left-3 z-10">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedTournIds((prev) => [...prev, t.id]);
+                            } else {
+                              setSelectedTournIds((prev) => prev.filter((id) => id !== t.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-neutral-700 bg-neutral-950/80 text-amber-500 focus:ring-0 cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Map & Mode Badges */}
+                      <div className="absolute top-3 right-3 flex items-center gap-1.5 text-[10px]">
+                        <span className="px-2 py-0.5 rounded-md bg-neutral-950/90 text-amber-400 font-bold border border-neutral-800">
+                          {t.mode}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-neutral-950/90 text-neutral-200 font-semibold border border-neutral-800">
+                          {t.map}
+                        </span>
+                      </div>
+
+                      {/* Status Tag */}
+                      <div className="absolute bottom-2.5 left-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            t.status === 'room_open'
+                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                              : t.status === 'completed'
+                              ? 'bg-neutral-950 text-neutral-400 border border-neutral-800'
+                              : 'bg-amber-950/80 text-amber-400 border border-amber-800/80'
+                          }`}
+                        >
+                          {t.status === 'room_open' ? 'Room Open' : t.status === 'completed' ? 'Completed' : 'Upcoming'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Card Content */}
+                    <div className="p-4 space-y-3 flex-1 flex flex-col justify-between text-xs">
+                      <div>
+                        <h4 className="font-bold text-white text-sm line-clamp-1 mb-1" title={t.title}>
+                          {t.title}
+                        </h4>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px] py-1 border-y border-neutral-800/80 my-2">
+                          <div>
+                            <span className="text-neutral-500 block">Entry Fee</span>
+                            <span className="font-bold text-emerald-400 font-mono">Rs. {t.entryFee} PKR</span>
+                          </div>
+                          <div>
+                            <span className="text-neutral-500 block">Prize Pool</span>
+                            <span className="font-bold text-amber-400 font-mono">Rs. {t.prizePool} PKR</span>
+                          </div>
+                          <div>
+                            <span className="text-neutral-500 block">Slots Joined</span>
+                            <span className="font-bold text-neutral-200 font-mono">
+                              {t.registeredCount} / {t.maxSlots}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-neutral-500 block">Room ID</span>
+                            <span className="font-mono text-neutral-300 font-semibold truncate block">
+                              {t.roomId || 'Not set'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3 CRITICAL BUTTONS: [Edit] [Delete] [Duplicate] */}
+                      <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-neutral-800">
+                        <button
+                          onClick={() => handleOpenEditTournament(t)}
+                          className="px-2 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold text-[11px] flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                          title="Edit Title, Prize, Map, Date, Image, Rules"
+                        >
+                          <Edit className="w-3 h-3 text-amber-400" />
+                          <span>Edit</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleDuplicateTournamentClick(t)}
+                          className="px-2 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold text-[11px] flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                          title="Duplicate Tournament with 1-click in Firestore"
+                        >
+                          <CopyPlus className="w-3 h-3 text-cyan-400" />
+                          <span>Duplicate</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteTournamentClick(t)}
+                          className="px-2 py-1.5 rounded-lg bg-red-950/60 hover:bg-red-900/80 text-red-300 font-semibold text-[11px] flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                          title="Delete from Firestore"
+                        >
+                          <Trash2 className="w-3 h-3 text-red-400" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* Tab 2: Player Withdrawals */}
-      {activeTab === 'withdrawals' && (
+      {/* ========================================================================= */}
+      {/* TAB 2: EASYPAISA & JAZZCASH DEPOSIT APPROVALS */}
+      {/* ========================================================================= */}
+      {activeTab === 'deposits' && (
         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 sm:p-6 space-y-4">
-          <div>
-            <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
-              <Coins className="w-5 h-5 text-amber-500" />
-              <span>{language === 'ur' ? 'Players Cashout / Withdrawal Requests' : 'Player Cashout / Withdrawal Queue'}</span>
-            </h3>
-            <p className="text-xs text-neutral-400 mt-0.5">
-              {language === 'ur'
-                ? 'Players jinhone jeet ke baad EasyPaisa ya JazzCash par withdrawal maangi hai.'
-                : 'Send PKR to player mobile accounts via your EasyPaisa/JazzCash app and mark completed.'}
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800 pb-4">
+            <div>
+              <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-emerald-400" />
+                <span>EasyPaisa & JazzCash Deposit Verification</span>
+              </h3>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                Players submit their Transaction ID (TID) after sending money to Saad Kazi. Verify and click Approve to credit balance immediately.
+              </p>
+            </div>
+
+            {selectedDepIds.length > 0 && (
+              <button
+                onClick={handleBatchDeleteDeposits}
+                className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Selected ({selectedDepIds.length})</span>
+              </button>
+            )}
           </div>
 
-          {withdrawalRequests.length === 0 ? (
-            <div className="text-center py-10 text-neutral-500 text-xs">No pending withdrawals.</div>
+          {/* Search Box */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={depSearch}
+                onChange={(e) => setDepSearch(e.target.value)}
+                placeholder="Search by Player IGN, UID, TRX ID / TID, or Sender Mobile..."
+                className="w-full pl-9 pr-4 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer hover:text-white shrink-0">
+              <input
+                type="checkbox"
+                checked={selectedDepIds.length > 0 && selectedDepIds.length === filteredDeposits.length}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedDepIds(filteredDeposits.map((d) => d.id));
+                  } else {
+                    setSelectedDepIds([]);
+                  }
+                }}
+                className="rounded border-neutral-700 bg-neutral-950 text-amber-500 focus:ring-0 cursor-pointer"
+              />
+              <span>Select All ({filteredDeposits.length})</span>
+            </label>
+          </div>
+
+          {filteredDeposits.length === 0 ? (
+            <div className="text-center py-10 text-neutral-500 text-xs">No deposit requests matched your search.</div>
           ) : (
             <div className="space-y-3">
-              {withdrawalRequests.map((wdr) => (
-                <div
-                  key={wdr.id}
-                  className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                          wdr.method === 'EasyPaisa' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'
-                        }`}
-                      >
-                        {wdr.method}
-                      </span>
-                      <span className="font-bold text-white text-sm font-mono tabular-nums">
-                        Rs. {wdr.amountPkr} PKR
-                      </span>
-                      <span className="text-neutral-500">·</span>
-                      <span className="text-neutral-300 font-semibold">{wdr.playerIgn}</span>
+              {filteredDeposits.map((dep) => {
+                const isSelected = selectedDepIds.includes(dep.id);
+                return (
+                  <div
+                    key={dep.id}
+                    className={`p-4 rounded-xl bg-neutral-950 border transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs ${
+                      isSelected ? 'border-amber-500' : 'border-neutral-800'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedDepIds((prev) => [...prev, dep.id]);
+                          } else {
+                            setSelectedDepIds((prev) => prev.filter((id) => id !== dep.id));
+                          }
+                        }}
+                        className="mt-1 rounded border-neutral-700 bg-neutral-900 text-amber-500 focus:ring-0 cursor-pointer"
+                      />
+
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                              dep.method === 'EasyPaisa'
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : 'bg-red-950 text-red-400 border border-red-800'
+                            }`}
+                          >
+                            {dep.method}
+                          </span>
+                          <span className="font-bold text-white text-base font-mono tabular-nums">
+                            Rs. {dep.amountPkr} PKR
+                          </span>
+                          <span className="text-neutral-500">·</span>
+                          <span className="text-neutral-200 font-semibold">{dep.playerIgn}</span>
+                          <span className="text-neutral-500 font-mono">(UID: {dep.playerUid})</span>
+                          {dep.status === 'approved' && (
+                            <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
+                              <CheckCircle className="w-3 h-3" /> Approved & Credited
+                            </span>
+                          )}
+                          {dep.status === 'rejected' && (
+                            <span className="text-red-400 font-semibold text-[11px]">Rejected</span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-neutral-400 text-[11px]">
+                          <span>
+                            Sender Mobile: <strong className="text-neutral-200 font-mono">{dep.senderNumber}</strong>{' '}
+                            {dep.senderName && `(${dep.senderName})`}
+                          </span>
+                          <span>·</span>
+                          <span>
+                            TRX ID / TID: <strong className="text-amber-400 font-mono">{dep.trxId}</strong>
+                          </span>
+                          <span>·</span>
+                          <span className="text-neutral-500">{dep.submittedAt}</span>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="text-neutral-400 text-[11px]">
-                      Account Number: <strong className="text-neutral-200 font-mono">{wdr.accountNumber}</strong> ({wdr.accountTitle})
+                    {/* Buttons: [Approve & Add Balance] [Reject] [Delete Request] [Edit Amount] */}
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end md:self-center">
+                      {dep.status === 'pending' && (
+                        <button
+                          onClick={() => handleApproveDepositClick(dep)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                        >
+                          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                          <span>Approve & Add Balance</span>
+                        </button>
+                      )}
+
+                      {dep.status === 'pending' && (
+                        <button
+                          onClick={() => handleRejectDepositClick(dep)}
+                          className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium text-xs transition-colors cursor-pointer"
+                        >
+                          Reject
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          sounds.playClick();
+                          setEditingDeposit(dep);
+                          setEditDepAmountInput(dep.amountPkr);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Edit Deposit Amount"
+                      >
+                        <Edit className="w-3 h-3 text-amber-400" />
+                        <span>Edit Amount</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteDepositClick(dep)}
+                        className="px-2.5 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-300 font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Delete Request from Firestore"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Delete</span>
+                      </button>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    {wdr.status === 'pending' ? (
-                      <>
+      {/* ========================================================================= */}
+      {/* TAB 3: PLAYER WITHDRAWALS */}
+      {/* ========================================================================= */}
+      {activeTab === 'withdrawals' && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800 pb-4">
+            <div>
+              <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
+                <Coins className="w-5 h-5 text-amber-500" />
+                <span>Player Cashout / Withdrawal Queue</span>
+              </h3>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                Send PKR directly to player mobile accounts via your EasyPaisa / JazzCash app, then mark as Paid.
+              </p>
+            </div>
+
+            {selectedWdrIds.length > 0 && (
+              <button
+                onClick={handleBatchDeleteWithdrawals}
+                className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Selected ({selectedWdrIds.length})</span>
+              </button>
+            )}
+          </div>
+
+          {/* Search Box */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={wdrSearch}
+                onChange={(e) => setWdrSearch(e.target.value)}
+                placeholder="Search by Player IGN, UID, Mobile Number, or Title..."
+                className="w-full pl-9 pr-4 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer hover:text-white shrink-0">
+              <input
+                type="checkbox"
+                checked={selectedWdrIds.length > 0 && selectedWdrIds.length === filteredWithdrawals.length}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedWdrIds(filteredWithdrawals.map((w) => w.id));
+                  } else {
+                    setSelectedWdrIds([]);
+                  }
+                }}
+                className="rounded border-neutral-700 bg-neutral-950 text-amber-500 focus:ring-0 cursor-pointer"
+              />
+              <span>Select All ({filteredWithdrawals.length})</span>
+            </label>
+          </div>
+
+          {filteredWithdrawals.length === 0 ? (
+            <div className="text-center py-10 text-neutral-500 text-xs">No withdrawal requests found.</div>
+          ) : (
+            <div className="space-y-3">
+              {filteredWithdrawals.map((wdr) => {
+                const isSelected = selectedWdrIds.includes(wdr.id);
+                return (
+                  <div
+                    key={wdr.id}
+                    className={`p-4 rounded-xl bg-neutral-950 border transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs ${
+                      isSelected ? 'border-amber-500' : 'border-neutral-800'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedWdrIds((prev) => [...prev, wdr.id]);
+                          } else {
+                            setSelectedWdrIds((prev) => prev.filter((id) => id !== wdr.id));
+                          }
+                        }}
+                        className="mt-1 rounded border-neutral-700 bg-neutral-900 text-amber-500 focus:ring-0 cursor-pointer"
+                      />
+
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                              wdr.method === 'EasyPaisa'
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : 'bg-red-950 text-red-400 border border-red-800'
+                            }`}
+                          >
+                            {wdr.method}
+                          </span>
+                          <span className="font-bold text-white text-base font-mono tabular-nums">
+                            Rs. {wdr.amountPkr} PKR
+                          </span>
+                          <span className="text-neutral-500">·</span>
+                          <span className="text-neutral-200 font-semibold">{wdr.playerIgn}</span>
+                          {wdr.playerUid && <span className="text-neutral-500 font-mono">(UID: {wdr.playerUid})</span>}
+                          {wdr.status === 'completed' && (
+                            <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
+                              <CheckCircle className="w-3 h-3" /> Transferred & Paid
+                            </span>
+                          )}
+                          {wdr.status === 'rejected' && (
+                            <span className="text-red-400 font-semibold text-[11px]">Rejected / Refunded</span>
+                          )}
+                          {wdr.status === 'approved' && (
+                            <span className="text-amber-400 font-semibold text-[11px]">Approved (Processing)</span>
+                          )}
+                        </div>
+
+                        {/* SEND MONEY TO: Clear user account information */}
+                        <div className="p-2.5 rounded-lg bg-neutral-900/90 border border-neutral-800 text-neutral-300 text-[11px] space-y-0.5">
+                          <div className="text-neutral-400 font-semibold">
+                            Send Payment To:{' '}
+                            <span className="text-amber-400 font-mono font-bold text-sm">
+                              {wdr.accountNumber}
+                            </span>{' '}
+                            ({wdr.method})
+                          </div>
+                          <div className="text-neutral-400">
+                            Account Holder Title: <strong className="text-white">{wdr.accountTitle}</strong>
+                          </div>
+                          {wdr.referenceId && (
+                            <div className="text-neutral-500 font-mono text-[10px]">
+                              Ref ID: {wdr.referenceId}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Buttons: [Approve] [Mark as Paid] [Reject] [Delete] */}
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end md:self-center">
+                      {wdr.status === 'pending' && (
                         <button
-                          onClick={() => {
-                            sounds.playVictory();
-                            onCompleteWithdrawal(wdr.id, `EP-${Math.floor(10000000 + Math.random() * 90000000)}`);
-                            showToast(`Withdrawal of Rs. ${wdr.amountPkr} to ${wdr.accountNumber} marked completed!`);
-                          }}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 transition-colors"
+                          onClick={() => handleApproveWithdrawalClick(wdr)}
+                          className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          Approve
+                        </button>
+                      )}
+
+                      {wdr.status !== 'completed' && (
+                        <button
+                          onClick={() => handleMarkPaidWithdrawalClick(wdr)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                         >
                           <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                           <span>Mark as Paid</span>
                         </button>
+                      )}
+
+                      {wdr.status !== 'rejected' && (
                         <button
-                          onClick={() => {
-                            sounds.playClick();
-                            onRejectWithdrawal(wdr.id);
-                            showToast(`Withdrawal rejected & refunded.`);
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-colors"
+                          onClick={() => handleRejectWithdrawalClick(wdr)}
+                          className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium text-xs transition-colors cursor-pointer"
                         >
-                          Reject / Refund
+                          Reject
                         </button>
-                      </>
-                    ) : (
-                      <span className="text-emerald-400 font-medium flex items-center gap-1">
-                        <CheckCircle className="w-3.5 h-3.5" /> Transferred via {wdr.method}
-                      </span>
-                    )}
+                      )}
+
+                      <button
+                        onClick={() => handleDeleteWithdrawalClick(wdr)}
+                        className="px-2.5 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-300 font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Delete Withdrawal Record"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Delete</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* Tab 3: Create Tournament */}
-      {activeTab === 'tournaments' && (
-        <form onSubmit={handleCreateSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5">
-          <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
-            <PlusCircle className="w-5 h-5 text-amber-500" />
-            <span>{language === 'ur' ? 'Naya Free Fire Match Banayein' : 'Host New Free Fire Tournament'}</span>
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-neutral-300 mb-1">Tournament Title</label>
-              <input
-                type="text"
-                required
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Qazi Battle Bermuda Squad Cup"
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-sm text-neutral-100 focus:outline-none focus:border-amber-500"
-              />
+      {/* ========================================================================= */}
+      {/* TAB 4: RESULTS & PROOFS (Upload, Edit, Delete, Distribute Prize) */}
+      {/* ========================================================================= */}
+      {activeTab === 'results' && (
+        <div className="space-y-5">
+          {/* Top Bar with Declare Result Modal Toggle */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-500" />
+                <span>Match Results & Winner Prize Distribution</span>
+              </h3>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                Declare Booyah Champions, review player screenshot proofs, and auto-transfer prize money directly to their wallet in Firestore.
+              </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-300 mb-1">Match Mode</label>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as MatchMode)}
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+            <div className="flex items-center gap-2">
+              {selectedProofIds.length > 0 && (
+                <button
+                  onClick={handleBatchDeleteProofs}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Selected ({selectedProofIds.length})</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => {
+                  sounds.playClick();
+                  setUploadResultOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
               >
-                <option value="Squad">Squad (12 Teams / 48 Players)</option>
-                <option value="Solo">Solo (48 Single Contenders)</option>
-                <option value="Duo">Duo (24 Teams)</option>
-                <option value="Clash Squad">Clash Squad 4v4</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-neutral-300 mb-1">Map</label>
-              <select
-                value={map}
-                onChange={(e) => setMap(e.target.value as MatchMap)}
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
-              >
-                <option value="Bermuda">Bermuda</option>
-                <option value="Purgatory">Purgatory</option>
-                <option value="Kalahari">Kalahari</option>
-                <option value="Alpine">Alpine</option>
-                <option value="NexTerra">NexTerra</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-neutral-300 mb-1">Entry Fee (PKR)</label>
-              <input
-                type="number"
-                min={0}
-                step={10}
-                value={entryFee}
-                onChange={(e) => setEntryFee(Number(e.target.value))}
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs font-mono text-neutral-100 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-neutral-300 mb-1">Total Prize Pool (PKR)</label>
-              <input
-                type="number"
-                min={100}
-                step={100}
-                value={prizePool}
-                onChange={(e) => setPrizePool(Number(e.target.value))}
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs font-mono text-neutral-100 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-neutral-300 mb-1">Per Kill Reward (PKR)</label>
-              <input
-                type="number"
-                min={0}
-                step={5}
-                value={perKill}
-                onChange={(e) => setPerKill(Number(e.target.value))}
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs font-mono text-neutral-100 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-neutral-300 mb-1">Start Delay (Minutes)</label>
-              <input
-                type="number"
-                min={5}
-                max={1440}
-                step={5}
-                value={startTimeMinutes}
-                onChange={(e) => setStartTimeMinutes(Number(e.target.value))}
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs font-mono text-neutral-100 focus:outline-none focus:border-amber-500"
-              />
+                <PlusCircle className="w-4 h-4 stroke-[2.5]" />
+                <span>+ Upload / Declare Match Result</span>
+              </button>
             </div>
           </div>
 
-          <button
-            type="submit"
-            className="px-6 py-2.5 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center gap-2"
-          >
-            <PlusCircle className="w-4 h-4 stroke-[2.5]" />
-            <span>Publish Tournament in Pakistan Server</span>
-          </button>
-        </form>
+          {/* Search Box */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={proofSearch}
+                onChange={(e) => setProofSearch(e.target.value)}
+                placeholder="Search results by Player IGN, UID, or Tournament Title..."
+                className="w-full pl-9 pr-4 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer hover:text-white shrink-0">
+              <input
+                type="checkbox"
+                checked={selectedProofIds.length > 0 && selectedProofIds.length === filteredProofs.length}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedProofIds(filteredProofs.map((p) => p.id));
+                  } else {
+                    setSelectedProofIds([]);
+                  }
+                }}
+                className="rounded border-neutral-700 bg-neutral-950 text-amber-500 focus:ring-0 cursor-pointer"
+              />
+              <span>Select All Results ({filteredProofs.length})</span>
+            </label>
+          </div>
+
+          {/* Results List */}
+          {filteredProofs.length === 0 ? (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-10 text-center text-neutral-500 text-xs">
+              No match results or screenshot claims recorded.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredProofs.map((p) => {
+                const isSelected = selectedProofIds.includes(p.id);
+                return (
+                  <div
+                    key={p.id}
+                    className={`p-4 rounded-xl bg-neutral-950 border transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs ${
+                      isSelected ? 'border-amber-500' : 'border-neutral-800'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedProofIds((prev) => [...prev, p.id]);
+                          } else {
+                            setSelectedProofIds((prev) => prev.filter((id) => id !== p.id));
+                          }
+                        }}
+                        className="mt-1 rounded border-neutral-700 bg-neutral-900 text-amber-500 focus:ring-0 cursor-pointer"
+                      />
+
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-white text-sm">{p.playerIgn}</span>
+                          <span className="text-neutral-500 font-mono">(UID: {p.playerUid})</span>
+                          <span className="text-neutral-600">·</span>
+                          <span className="text-amber-400 font-semibold">{p.tournamentTitle}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded font-semibold text-[10px] uppercase ${
+                              p.status === 'approved'
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : p.status === 'rejected'
+                                ? 'bg-red-950 text-red-400 border border-red-800'
+                                : 'bg-neutral-800 text-neutral-300'
+                            }`}
+                          >
+                            {p.status}
+                          </span>
+                        </div>
+
+                        <div className="text-neutral-400 text-[11px] flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span>Claimed Rank: <strong className="text-white font-mono">#{p.claimedRank}</strong></span>
+                          <span>·</span>
+                          <span>Kills: <strong className="text-white font-mono">{p.claimedKills}</strong></span>
+                          <span>·</span>
+                          <span>
+                            Prize Awarded:{' '}
+                            <strong className="text-emerald-400 font-mono">Rs. {p.awardedPrize || 0} PKR</strong>
+                          </span>
+                          <span>·</span>
+                          <span className="text-neutral-500">{p.submissionTime}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action buttons: [Distribute Prize] [Edit Result] [Delete Match Result] */}
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end md:self-center">
+                      <button
+                        onClick={() => handleDistributePrizeClick(p)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                        title="Auto send prize directly to player's wallet"
+                      >
+                        <Trophy className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Distribute Prize</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          sounds.playClick();
+                          setEditingProof({ ...p });
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium text-xs flex items-center gap-1 cursor-pointer"
+                        title="Edit Result Details"
+                      >
+                        <Edit className="w-3 h-3 text-amber-400" />
+                        <span>Edit</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteProofClick(p)}
+                        className="px-2.5 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-300 font-medium text-xs flex items-center gap-1 cursor-pointer"
+                        title="Delete Match Result"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Delete</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Tab 4: Room ID Broadcaster */}
+      {/* ========================================================================= */}
+      {/* TAB 5: ROOM ID BROADCASTER */}
+      {/* ========================================================================= */}
       {activeTab === 'rooms' && (
-        <form onSubmit={handleBroadcastSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!selectedTournForRoom || !broadcastRoomId.trim() || !broadcastPass.trim()) return;
+            onUpdateRoomCredentials(selectedTournForRoom, broadcastRoomId.trim(), broadcastPass.trim(), true);
+            sounds.playVictory();
+            showToast('Room credentials successfully broadcasted to registered players!');
+          }}
+          className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-5"
+        >
           <div className="flex items-center gap-2 text-xs font-semibold text-amber-500 uppercase">
             <Key className="w-4 h-4" />
             <span>Room ID & Password Distribution</span>
           </div>
 
           <p className="text-xs text-neutral-400">
-            {language === 'ur'
-              ? 'Garena Free Fire me Custom Room banayein, phir Room ID aur Password yahan likh kar broadcast dabayein. Sirf un players ko dikhegi jinhone fees di hai.'
-              : 'Create the room in Free Fire, input the credentials below, and unlock it for confirmed participants.'}
+            Create the custom room in Free Fire, input the credentials below, and unlock it for confirmed participants.
           </p>
 
           <div className="space-y-4">
@@ -884,7 +2042,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center gap-2"
+              className="px-6 py-2.5 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center gap-2 cursor-pointer"
             >
               <Send className="w-4 h-4 stroke-[2.5]" />
               <span>Broadcast Room ID to Registered Players</span>
@@ -893,111 +2051,119 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </form>
       )}
 
-      {/* Tab 5: Results & Proofs */}
-      {activeTab === 'results' && (
-        <div className="space-y-6">
-          <form onSubmit={handleWinnerSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
+      {/* ========================================================================= */}
+      {/* TAB 6: ALL USERS (Signup Stats & Player List) */}
+      {/* ========================================================================= */}
+      {activeTab === 'users' && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 sm:p-6 space-y-4">
+          <div className="border-b border-neutral-800 pb-4">
             <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-amber-500" />
-              <span>Booyah Winner Declaration & Automatic Payouts</span>
+              <Users className="w-5 h-5 text-amber-500" />
+              <span>Registered Players & Signup Management</span>
             </h3>
+            <p className="text-xs text-neutral-400 mt-0.5">
+              Live list of all contenders who registered accounts with their own Email, Free Fire IGN, and UID.
+            </p>
+          </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1">Tournament</label>
-                <select
-                  value={selectedTournForResult}
-                  onChange={(e) => setSelectedTournForResult(e.target.value)}
-                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
-                >
-                  {tournaments.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1">Winning Squad / Team</label>
-                <input
-                  type="text"
-                  required
-                  value={winnerTeamInput}
-                  onChange={(e) => setWinnerTeamInput(e.target.value)}
-                  placeholder="e.g. Team Falcon"
-                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1">MVP / Kill Bounty Details</label>
-                <input
-                  type="text"
-                  value={winnerIgnInput}
-                  onChange={(e) => setWinnerIgnInput(e.target.value)}
-                  placeholder="e.g. FALCON・Sniper (12 Kills MVP)"
-                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
-                />
+          {/* Quick Stats Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800">
+              <span className="text-[10px] text-neutral-500 uppercase font-semibold">Total Signups</span>
+              <div className="text-xl font-bold font-mono text-white mt-0.5">{allUsers.length}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800">
+              <span className="text-[10px] text-neutral-500 uppercase font-semibold">Active Players</span>
+              <div className="text-xl font-bold font-mono text-emerald-400 mt-0.5">
+                {allUsers.filter((u) => !u.isBlocked).length}
               </div>
             </div>
-
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl font-bold text-xs bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all flex items-center gap-2"
-            >
-              <Trophy className="w-4 h-4 stroke-[2.5]" />
-              <span>Declare Booyah & Mark Completed</span>
-            </button>
-          </form>
-
-          {/* Pending Proofs Review */}
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-3">
-            <h4 className="text-sm font-bold text-white">Player Screenshot Proof Claims ({pendingProofs.length})</h4>
-            {pendingProofs.map((p) => (
-              <div
-                key={p.id}
-                className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between text-xs"
-              >
-                <div>
-                  <span className="font-bold text-white">{p.playerIgn}</span>
-                  <span className="text-neutral-500 font-mono"> (UID: {p.playerUid})</span>
-                  <span className="text-neutral-500"> · </span>
-                  <span className="text-amber-400 font-semibold">{p.tournamentTitle}</span>
-                  <div className="text-neutral-400 text-[11px] mt-0.5">
-                    Claimed Rank: #{p.claimedRank} · Kills: {p.claimedKills} · Calculated Prize: Rs. {p.awardedPrize} PKR
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      sounds.playVictory();
-                      onApproveProof(p.id);
-                      showToast(`Proof for ${p.playerIgn} approved!`);
-                    }}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => {
-                      sounds.playClick();
-                      onRejectProof(p.id);
-                      showToast(`Proof rejected.`);
-                    }}
-                    className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 rounded-lg"
-                  >
-                    Reject
-                  </button>
-                </div>
+            <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800">
+              <span className="text-[10px] text-neutral-500 uppercase font-semibold">Blocked Contenders</span>
+              <div className="text-xl font-bold font-mono text-red-400 mt-0.5">
+                {allUsers.filter((u) => u.isBlocked).length}
               </div>
-            ))}
+            </div>
+            <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800">
+              <span className="text-[10px] text-neutral-500 uppercase font-semibold">Total Wallet Holdings</span>
+              <div className="text-sm font-bold font-mono text-amber-400 mt-1 truncate">
+                Rs. {allUsers.reduce((sum, u) => sum + (u.walletBalance || 0), 0)} PKR
+              </div>
+            </div>
           </div>
+
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              placeholder="Search users by Name, UID, Email, or WhatsApp..."
+              className="w-full pl-9 pr-4 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+            />
+          </div>
+
+          {/* Table */}
+          {filteredUsers.length === 0 ? (
+            <div className="text-center py-10 text-neutral-500 text-xs">No registered players found.</div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-neutral-800">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-neutral-950 text-neutral-400 uppercase font-semibold border-b border-neutral-800 text-[10px]">
+                  <tr>
+                    <th className="px-4 py-3">Sr.</th>
+                    <th className="px-4 py-3">Player Name (IGN)</th>
+                    <th className="px-4 py-3">FF Numeric UID</th>
+                    <th className="px-4 py-3">Email / Contact</th>
+                    <th className="px-4 py-3">Balance</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-800/80 bg-neutral-900/60 font-mono">
+                  {filteredUsers.map((u, idx) => (
+                    <tr key={u.id} className="hover:bg-neutral-800/40 transition-colors">
+                      <td className="px-4 py-3 text-neutral-500">{idx + 1}</td>
+                      <td className="px-4 py-3 font-sans font-bold text-white">{u.displayName || 'Unnamed'}</td>
+                      <td className="px-4 py-3 text-amber-400">{u.ffUid || 'N/A'}</td>
+                      <td className="px-4 py-3 text-neutral-300 font-sans">{u.email || u.phone || 'N/A'}</td>
+                      <td className="px-4 py-3 text-emerald-400 font-bold">Rs. {u.walletBalance || 0}</td>
+                      <td className="px-4 py-3 font-sans">
+                        {u.isBlocked ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-red-950 text-red-400 border border-red-800 font-semibold">
+                            Blocked
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 font-semibold">
+                            Active
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-sans">
+                        <button
+                          onClick={() => handleToggleBlockUser(u)}
+                          className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                            u.isBlocked
+                              ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                              : 'bg-red-950/60 hover:bg-red-900/80 text-red-300'
+                          }`}
+                        >
+                          {u.isBlocked ? 'Unblock' : 'Block User'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Tab 6: Admin Payment Settings (For Saad Kazi) */}
+      {/* ========================================================================= */}
+      {/* TAB 7: SAAD KAZI ADMIN PAYMENT SETTINGS (Editable in Firestore) */}
+      {/* ========================================================================= */}
       {activeTab === 'settings' && (
         <form onSubmit={handleSaveSettings} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800 pb-4">
@@ -1007,14 +2173,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <span>Admin Payment Settings (Saad Kazi Receiving Wallets)</span>
               </h3>
               <p className="text-xs text-neutral-400 mt-1">
-                {language === 'ur'
-                  ? 'Yahan Saad Kazi apna EasyPaisa aur JazzCash number save karein. Ye numbers public Player App mein Wallet Page par "Send Payment To" ke taur par show honge. 100% paise direct Saad Kazi ke mobile wallet me jayenge.'
-                  : 'Configure Saad Kazi’s personal EasyPaisa and JazzCash receiving wallets. Contenders send payments directly to these mobile accounts and input their TID.'}
+                Edit Saad Kazi’s personal EasyPaisa and JazzCash numbers directly from this panel. Changes save to Firestore collection "adminSettings" and update across the entire Player App immediately!
               </p>
             </div>
             <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold text-xs shrink-0 flex items-center gap-1.5">
               <Check className="w-3.5 h-3.5" />
-              <span>100% Direct P2P Transfer Active</span>
+              <span>Direct Mobile Transfer 100% Active</span>
             </span>
           </div>
 
@@ -1026,7 +2190,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <Smartphone className="w-4 h-4" />
                   <span>EasyPaisa Receiving Account</span>
                 </div>
-                <span className="text-[10px] text-neutral-500 font-mono">Telenor Bank</span>
+                <span className="text-[10px] text-neutral-500 font-mono">Telenor Microfinance</span>
               </div>
 
               <div>
@@ -1036,7 +2200,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   required
                   value={epNumber}
                   onChange={(e) => setEpNumber(e.target.value)}
-                  placeholder="0345-9876543"
+                  placeholder="0318-2655142"
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -1061,7 +2225,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <Smartphone className="w-4 h-4" />
                   <span>JazzCash Receiving Account</span>
                 </div>
-                <span className="text-[10px] text-neutral-500 font-mono">Mobilink Bank</span>
+                <span className="text-[10px] text-neutral-500 font-mono">Mobilink Microfinance</span>
               </div>
 
               <div>
@@ -1071,7 +2235,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   required
                   value={jcNumber}
                   onChange={(e) => setJcNumber(e.target.value)}
-                  placeholder="0302-1234567"
+                  placeholder="0318-2655142"
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100 focus:outline-none focus:border-red-500"
                 />
               </div>
@@ -1096,7 +2260,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 type="text"
                 value={supportWhatsapp}
                 onChange={(e) => setSupportWhatsapp(e.target.value)}
-                placeholder="+92 345 9876543"
+                placeholder="+92 318 2655142"
                 className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-neutral-100 font-mono focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -1111,60 +2275,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
               />
             </div>
-
-            {/* Future Merchant API Gateway Switch */}
-            <div className="sm:col-span-2 p-4 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-amber-500" />
-                    <span>Future Direct Merchant API Gateway</span>
-                  </h4>
-                  <p className="text-[11px] text-neutral-400 mt-0.5">
-                    Agar mustaqbil me EasyPaisa / JazzCash Merchant Merchant IPN/API credentials mil jayein to yahan se automate kar sakte hain. Filhal direct mobile transfer 100% active hai.
-                  </p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={merchantApiEnabled}
-                    onChange={(e) => setMerchantApiEnabled(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
-                </label>
-              </div>
-
-              {merchantApiEnabled && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-neutral-800">
-                  <div>
-                    <label className="block text-[10px] text-neutral-400 mb-1">Merchant Store ID</label>
-                    <input
-                      type="text"
-                      value={merchantStoreId}
-                      onChange={(e) => setMerchantStoreId(e.target.value)}
-                      placeholder="e.g. EP-STORE-9921"
-                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-neutral-400 mb-1">Merchant Secret Key / Hash</label>
-                    <input
-                      type="password"
-                      value={merchantApiKey}
-                      onChange={(e) => setMerchantApiKey(e.target.value)}
-                      placeholder="••••••••••••••••"
-                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg font-mono text-xs text-neutral-100"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t border-neutral-800">
             <span className="text-[11px] text-neutral-400">
-              Numbers will update immediately across the entire player app.
+              Numbers will update immediately in the Player App Wallet screen without modifying any code.
             </span>
             <button
               type="submit"
@@ -1175,6 +2290,488 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </button>
           </div>
         </form>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 1: EDIT TOURNAMENT POPUP */}
+      {/* ========================================================================= */}
+      {editingTournament && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-neutral-900 border border-neutral-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
+                <Edit className="w-4 h-4 text-amber-500" />
+                <span>Edit Tournament ({editingTournament.title})</span>
+              </h3>
+              <button
+                onClick={() => setEditingTournament(null)}
+                className="text-neutral-500 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedTournament} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-neutral-300 font-semibold mb-1">Title</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingTournament.title}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, title: e.target.value })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Map</label>
+                  <select
+                    value={editingTournament.map}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, map: e.target.value as MatchMap })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="Bermuda">Bermuda</option>
+                    <option value="Purgatory">Purgatory</option>
+                    <option value="Kalahari">Kalahari</option>
+                    <option value="Alpine">Alpine</option>
+                    <option value="NexTerra">NexTerra</option>
+                    <option value="Craftland">Craftland</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Mode</label>
+                  <select
+                    value={editingTournament.mode}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, mode: e.target.value as MatchMode })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="Squad">Squad</option>
+                    <option value="Solo">Solo</option>
+                    <option value="Duo">Duo</option>
+                    <option value="Clash Squad">Clash Squad</option>
+                    <option value="1v1">1v1</option>
+                    <option value="2v2">2v2</option>
+                    <option value="4v4">4v4</option>
+                    <option value="Lone Wolf">Lone Wolf</option>
+                    <option value="Full Map Custom">Full Map Custom</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Entry Fee (PKR)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editingTournament.entryFee}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, entryFee: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Prize Pool (PKR)</label>
+                  <input
+                    type="number"
+                    min={100}
+                    value={editingTournament.prizePool}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, prizePool: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Max Slots</label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={100}
+                    value={editingTournament.maxSlots}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, maxSlots: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Start Date & Time (ISO)</label>
+                  <input
+                    type="text"
+                    value={editingTournament.startTime}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, startTime: e.target.value })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-neutral-300 font-semibold mb-1">Banner Image URL</label>
+                  <input
+                    type="url"
+                    value={editingTournament.imageUrl || ''}
+                    onChange={(e) =>
+                      setEditingTournament({ ...editingTournament, imageUrl: e.target.value })
+                    }
+                    placeholder="https://example.com/banner.jpg"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  />
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingTournament({ ...editingTournament, imageUrl: mapBermuda })}
+                      className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-[10px] text-neutral-300 cursor-pointer"
+                    >
+                      Bermuda Default
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingTournament({ ...editingTournament, imageUrl: trophyImg })}
+                      className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-[10px] text-neutral-300 cursor-pointer"
+                    >
+                      Trophy Arena
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingTournament({ ...editingTournament, imageUrl: heroImg })}
+                      className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-[10px] text-neutral-300 cursor-pointer"
+                    >
+                      Hero Wallpaper
+                    </button>
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-neutral-300 font-semibold mb-1">Custom Rules Note</label>
+                  <input
+                    type="text"
+                    value={editingTournament.rules?.customNote || ''}
+                    onChange={(e) =>
+                      setEditingTournament({
+                        ...editingTournament,
+                        rules: { ...editingTournament.rules, customNote: e.target.value },
+                      })
+                    }
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingTournament(null)}
+                  className="px-4 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save Changes in Firestore</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: CONFIRMATION MODAL ("Kya delete karna hai?") */}
+      {/* ========================================================================= */}
+      {deleteConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm">
+          <div className="relative w-full max-w-md bg-neutral-900 border border-red-800/80 rounded-2xl p-6 space-y-4 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-700 text-red-400 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-display font-black text-white">{deleteConfirmModal.title}</h3>
+              <p className="text-xs text-neutral-400 mt-2 leading-relaxed">
+                {deleteConfirmModal.description}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => setDeleteConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-semibold text-xs transition-colors cursor-pointer"
+              >
+                Cancel (Ruk Jao)
+              </button>
+
+              <button
+                onClick={async () => {
+                  await deleteConfirmModal.onConfirm();
+                  setDeleteConfirmModal((prev) => ({ ...prev, isOpen: false }));
+                }}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs transition-colors cursor-pointer shadow-lg shadow-red-950 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Haan, Delete Karein</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 3: EDIT DEPOSIT AMOUNT MODAL */}
+      {/* ========================================================================= */}
+      {editingDeposit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm">
+          <div className="relative w-full max-w-sm bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <h3 className="text-sm font-display font-bold text-white flex items-center gap-2">
+                <Edit className="w-4 h-4 text-amber-500" />
+                <span>Edit Deposit Amount (PKR)</span>
+              </h3>
+              <button onClick={() => setEditingDeposit(null)} className="text-neutral-500 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditDepositAmount} className="space-y-3 text-xs">
+              <div>
+                <span className="text-neutral-400 block mb-1">
+                  Player: <strong className="text-white">{editingDeposit.playerIgn}</strong> (TID: {editingDeposit.trxId})
+                </span>
+                <label className="block text-neutral-300 font-semibold mb-1">Corrected Amount in PKR</label>
+                <input
+                  type="number"
+                  required
+                  min={10}
+                  step={10}
+                  value={editDepAmountInput}
+                  onChange={(e) => setEditDepAmountInput(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono text-base focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDeposit(null)}
+                  className="px-3 py-1.5 rounded-lg bg-neutral-800 text-neutral-300 text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs cursor-pointer shadow-md"
+                >
+                  Save in Firestore
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 4: EDIT MATCH RESULT / PROOF MODAL */}
+      {/* ========================================================================= */}
+      {editingProof && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm">
+          <div className="relative w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <h3 className="text-sm font-display font-bold text-white flex items-center gap-2">
+                <Edit className="w-4 h-4 text-amber-500" />
+                <span>Edit Match Result / Proof</span>
+              </h3>
+              <button onClick={() => setEditingProof(null)} className="text-neutral-500 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditProof} className="space-y-3 text-xs">
+              <div>
+                <span className="text-neutral-400 block mb-2">
+                  Player: <strong className="text-white">{editingProof.playerIgn}</strong> · {editingProof.tournamentTitle}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Rank (#)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editingProof.claimedRank}
+                    onChange={(e) => setEditingProof({ ...editingProof, claimedRank: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Kills</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editingProof.claimedKills}
+                    onChange={(e) => setEditingProof({ ...editingProof, claimedKills: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-neutral-300 font-semibold mb-1">Awarded Prize (PKR)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editingProof.awardedPrize || 0}
+                  onChange={(e) => setEditingProof({ ...editingProof, awardedPrize: Number(e.target.value) })}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-300 font-semibold mb-1">Status</label>
+                <select
+                  value={editingProof.status}
+                  onChange={(e) => setEditingProof({ ...editingProof, status: e.target.value as any })}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white"
+                >
+                  <option value="approved">Approved</option>
+                  <option value="pending">Pending</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingProof(null)}
+                  className="px-3 py-1.5 rounded-lg bg-neutral-800 text-neutral-300 text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs cursor-pointer shadow-md"
+                >
+                  Save in Firestore
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 5: UPLOAD / DECLARE MATCH RESULT MODAL */}
+      {/* ========================================================================= */}
+      {uploadResultOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg bg-neutral-900 border border-neutral-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <h3 className="text-base font-display font-bold text-white flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-500" />
+                <span>Upload & Declare Match Result</span>
+              </h3>
+              <button onClick={() => setUploadResultOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUploadResultSubmit} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-neutral-300 font-semibold mb-1">Select Tournament</label>
+                <select
+                  value={resTournId}
+                  onChange={(e) => setResTournId(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                >
+                  {tournaments.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title} ({t.mode} · Rs. {t.prizePool} PKR)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Winning Squad / Team</label>
+                  <input
+                    type="text"
+                    value={resWinnerTeam}
+                    onChange={(e) => setResWinnerTeam(e.target.value)}
+                    placeholder="e.g. Team Falcon"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Booyah Winner Player IGN</label>
+                  <input
+                    type="text"
+                    required
+                    value={resWinnerIgn}
+                    onChange={(e) => setResWinnerIgn(e.target.value)}
+                    placeholder="e.g. FALCON・Sniper"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Free Fire UID (Optional)</label>
+                  <input
+                    type="text"
+                    value={resWinnerUid}
+                    onChange={(e) => setResWinnerUid(e.target.value)}
+                    placeholder="e.g. 192849102"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-semibold mb-1">Prize Amount (PKR)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={resPrizeAmount}
+                    onChange={(e) => setResPrizeAmount(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setUploadResultOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  <Trophy className="w-3.5 h-3.5" />
+                  <span>Publish Result in Firestore</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

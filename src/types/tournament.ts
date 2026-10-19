@@ -56,6 +56,7 @@ export interface Tournament {
   roomPassword?: string;
   roomRevealed: boolean;
   version: 'Mobile Only' | 'All Devices' | 'PC Blocked';
+  imageUrl?: string;
   isCustomRoom?: boolean;
   customRoomType?: CustomRoomType;
   rules: {
@@ -87,6 +88,7 @@ export interface CompletedRoom {
   completedAt: string;
   status: MatchStatus;
   roomId?: string;
+  imageUrl?: string;
   winnerTeam?: string;
   winnerBooyahIgn?: string;
   deletedReason?: 'finished' | 'canceled_by_admin' | 'deleted';
@@ -132,7 +134,7 @@ export interface WithdrawalRequest {
   accountNumber: string;
   accountTitle: string;
   submittedAt: string;
-  status: 'pending' | 'completed' | 'rejected';
+  status: 'pending' | 'approved' | 'completed' | 'rejected';
   referenceId?: string;
 }
 

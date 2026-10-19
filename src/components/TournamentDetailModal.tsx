@@ -52,10 +52,10 @@ export const TournamentDetailModal: React.FC<TournamentDetailModalProps> = ({
         {/* Header Cover Banner */}
         <div className="relative h-44 sm:h-52 w-full bg-neutral-950 overflow-hidden">
           <img
-            src={mapBermuda}
-            alt={tournament.map}
+            src={tournament.imageUrl || mapBermuda}
+            alt={tournament.title || tournament.map}
             referrerPolicy="no-referrer"
-            className="w-full h-full object-cover opacity-50"
+            className="w-full h-full object-cover opacity-60"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/60 to-transparent" />
 

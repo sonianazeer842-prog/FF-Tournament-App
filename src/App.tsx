@@ -50,6 +50,8 @@ import {
   createTournamentInDb,
   declareWinnerInDb,
   saveAdminSettingsInDb,
+  subscribeMatchProofs,
+  submitMatchProofInDb,
 } from './lib/tournamentService';
 import { sounds } from './utils/audio';
 import { Trophy, Flame, Plus, ArrowRight, Lock, ShieldCheck, UserCheck } from 'lucide-react';
@@ -97,12 +99,16 @@ export default function App() {
     const unsubSettings = subscribeAdminSettings((st) => {
       setAdminSettings(st);
     });
+    const unsubProofs = subscribeMatchProofs((pfs) => {
+      setPendingProofs(pfs);
+    });
 
     return () => {
       unsubTourn();
       unsubDep();
       unsubWdr();
       unsubSettings();
+      unsubProofs();
     };
   }, []);
 
@@ -415,8 +421,12 @@ export default function App() {
     }
   };
 
-  const handleSubmitProof = (proof: MatchProofSubmission) => {
-    setPendingProofs((prev) => [proof, ...prev]);
+  const handleSubmitProof = async (proof: MatchProofSubmission) => {
+    try {
+      await submitMatchProofInDb(proof);
+    } catch (err) {
+      console.error('Error submitting match proof to DB:', err);
+    }
   };
 
   const handleApproveProof = (proofId: string) => {
